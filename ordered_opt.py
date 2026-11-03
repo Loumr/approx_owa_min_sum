@@ -137,7 +137,7 @@ def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum):
         return sol, val, POS, 1
 
     # Case o1 > 0
-    c_min, c_max = np.min(cost_matrix > 0), np.max(cost_matrix)
+    c_min, c_max = cost_matrix[cost_matrix > 0].min(), cost_matrix.max()
     k_min = int(np.floor(np.log(c_min) / np.log(1 + eps)))
     k_max = int(np.ceil(np.log(c_max) / np.log(1 + eps)))
     S = [(1 + eps) ** k for k in range(k_min, k_max + 1)]  
@@ -213,18 +213,29 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n", type=int, nargs="+", default=10)
+    parser.add_argument("--n", "--n-values", dest="n", type=int, nargs="+", default=[10])
     parser.add_argument("--delta", type=float, default=0.1)
     parser.add_argument("--eps", type=float, default=0.1)
     parser.add_argument("--w-type", default="s_gini_1.5_weights")
     parser.add_argument("--nb-instances", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--time-limit", type=float, default=3600.0,
-                         help="mean budget (s) per (method, n) -- default 3600s.")
-
+                        help="mean budget (s) per (method, n) -- default 3600s.")
+    parser.add_argument("--output", default=None,
+                        help="final results file (.parquet or .csv); per-instance CSV checkpoints go in the same folder")
     args = parser.parse_args()
 
-    n, delta, eps, w_type = args.n, args.delta, args.eps, args.w_type
+    results_dir = os.path.dirname(args.output) if args.output else "../results/assignment"
 
-    test_approx_assign(n=n, delta=delta, eps=eps, w_type=w_type, nb_instances=30, save=True, seed=0)
- 
+    dfs = [test_approx_assign(n=n, delta=args.delta, eps=args.eps, w_type=args.w_type,
+                              nb_instances=args.nb_instances, save=True, seed=args.seed,
+                              results_dir=results_dir)
+           for n in args.n]
+
+    if args.output:
+        out = pd.concat(dfs, ignore_index=True)
+        if args.output.endswith(".parquet"):
+            out.to_parquet(args.output, index=False)   # requires pyarrow or fastparquet
+        else:
+            out.to_csv(args.output, index=False)
+        print(f"Results written to {args.output}")
