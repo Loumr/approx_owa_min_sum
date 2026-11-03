@@ -99,10 +99,8 @@ export GRB_LICENSE_FILE=$HOME/gurobi_licenses/big17.lic
 mkdir -p ../results/assignment
 
 # =====================================================================
-# APPEL À elicitation.py (SIMPLIFIÉ)
+# APPEL AU SCRIPT PYTHON
 # =====================================================================
-# Les trois variantes sont lancées AUTOMATIQUEMENT
-# (pas besoin de --compute-x-method, --filter-dominated, --delete-sols, --no-prune)
 
 python3 ~/projet_owa_min_sum/approx_owa_min_sum/ordered_opt.py \
     --n-values $N \

@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import time
 import sys
+import argparse
 from instance_generator import generate_instances
 
 
@@ -159,15 +160,15 @@ def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum):
 # Experiments: one row per instance, appended to the CSV as soon as it is done
 # ---------------------------------------------------------------------------
  
-def results_path(results_dir, n, delta, eps, w_type, seed):
+def results_path(results_dir, n, delta, eps, w_type):
     """One file per configuration, so runs with different parameters never overwrite each other."""
-    return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}_seed{seed}.csv")
+    return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv")
  
 
  
 def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                        results_dir="../results/assignment", save_solutions=True):
-    path = results_path(results_dir, n, delta, eps, w_type, seed)
+    path = results_path(results_dir, n, delta, eps, w_type)
     done = set()
     if save:
         os.makedirs(results_dir, exist_ok=True)
@@ -211,7 +212,19 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
  
 
 if __name__ == "__main__":
-    n, delta, eps = int(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3])
-    w_type = sys.argv[4] if len(sys.argv) > 4 else "linear_weights"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n", type=int, nargs="+", default=10)
+    parser.add_argument("--delta", type=float, default=0.1)
+    parser.add_argument("--eps", type=float, default=0.1)
+    parser.add_argument("--w-type", default="s_gini_1.5_weights")
+    parser.add_argument("--nb-instances", type=int, default=30)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--time-limit", type=float, default=3600.0,
+                         help="mean budget (s) per (method, n) -- default 3600s.")
+
+    args = parser.parse_args()
+
+    n, delta, eps, w_type = args.n, args.delta, args.eps, args.w_type
+
     test_approx_assign(n=n, delta=delta, eps=eps, w_type=w_type, nb_instances=30, save=True, seed=0)
  
