@@ -1,9 +1,10 @@
-10 0.1 0.1 
-20 0.1 0.1 
-30 0.1 0.1 
-40 0.1 0.1 
-50 0.1 0.1 
-60 0.1 0.1
-80 0.1 0.1
-100 0.1 0.1
-200 0.1 0.1
+min_lorenz 10
+min_lorenz 20
+min_lorenz 30
+min_lorenz 40
+min_lorenz 50
+min_lorenz 60
+min_lorenz 80
+min_lorenz 100
+min_lorenz 150
+min_lorenz 200
