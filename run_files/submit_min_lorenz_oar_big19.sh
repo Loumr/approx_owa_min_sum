@@ -1,5 +1,5 @@
 #!/bin/bash
-#OAR -l {host='big19'}/core=4,walltime=01:00:00
+#OAR -l {host='big19'}/core=4,walltime=30:00:00
 #OAR --notify mail:lou.moulin-roussel@lip6.fr
 #OAR -O logs/min_lorenz_%jobid%.out
 #OAR -E logs/min_lorenz_%jobid%.err

@@ -268,7 +268,7 @@ if __name__ == "__main__":
     parser.add_argument("--w-type", default="s_gini_1.5_weights")
     parser.add_argument("--nb-instances", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--time-limit", type=float, default=3600.0,
+    parser.add_argument("--time-limit", type=float, default=55000.0,
                         help="wall-clock budget (s) for all instances of one n value; <= 0 means unlimited")
     parser.add_argument("--workers", type=int, default=None,
                         help="number of worker processes (default: cores allocated by OAR)")

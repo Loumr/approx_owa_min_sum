@@ -20,7 +20,6 @@ Instances sauvegardées dans --instances-dir (voir instance_store.py).
 
 import os
 
-# AVANT l'import de numpy : un seul thread de calcul par worker
 for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_var, "1")
 
@@ -284,7 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("--w-type", default="linear_weights")
     parser.add_argument("--nb-instances", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--time-limit", type=float, default=3600.0,
+    parser.add_argument("--time-limit", type=float, default=55000.0,
                         help="budget total (s, temps réel) pour les instances d'un n ; <= 0 : illimité")
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--gurobi-threads", type=int, default=1)
