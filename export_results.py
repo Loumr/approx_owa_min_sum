@@ -82,8 +82,9 @@ def load_results(results_dir="../results/assignment", patterns=PATTERNS):
     Charge et concatène tous les CSV de résultats d'un dossier.
 
     Les doublons (même configuration, graine et instance, par exemple après une
-    reprise) sont supprimés en gardant la dernière ligne écrite. Les fichiers sans
-    colonne 'status' reçoivent le statut 'unknown'.
+    reprise) sont supprimés en gardant la dernière ligne écrite. Dans les fichiers sans
+    colonne 'status' (anciennes versions sans limite de temps), une ligne avec une valeur
+    est considérée comme terminée.
     """
     files = sorted({f for p in patterns for f in glob.glob(os.path.join(results_dir, p))})
     if not files:
@@ -99,8 +100,13 @@ def load_results(results_dir="../results/assignment", patterns=PATTERNS):
     for col in CONFIG_KEYS:
         if col not in df.columns:
             df[col] = np.nan
+    # Fichiers écrits par d'anciennes versions, sans colonne 'status' : ces versions n'avaient
+    # pas de limite de temps et n'écrivaient une ligne qu'une fois l'instance terminée, donc
+    # une ligne avec une valeur est une instance terminée.
     if "status" not in df.columns:
-        df["status"] = "unknown"
+        df["status"] = np.nan
+    no_status = df["status"].isna()
+    df.loc[no_status & df["best_value"].notna(), "status"] = "completed"
     df["status"] = df["status"].fillna("unknown")
     if "assignment" in df.columns:
         df["assignment"] = df["assignment"].fillna("").astype(str)

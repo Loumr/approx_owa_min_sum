@@ -1,10 +1,4 @@
-exact 10
-exact 20
-exact 30
-exact 40
-exact 50
-exact 60
-exact 80
-exact 100
-exact 150
-exact 200
+min_lorenz 1500
+min_lorenz 2000
+min_lorenz 2500
+min_lorenz 3000
