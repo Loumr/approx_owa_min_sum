@@ -1,4 +1,4 @@
-min_lorenz 1500
-min_lorenz 2000
-min_lorenz 2500
-min_lorenz 3000
+exact 80
+exact 100
+exact 150
+exact 200
