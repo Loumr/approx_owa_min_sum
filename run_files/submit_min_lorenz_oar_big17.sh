@@ -58,7 +58,7 @@ N=$2
 EPS=${3:-0}
 W_TYPE="linear_weights"
 NB_INSTANCES=30
-TIME_LIMIT=1900          # budget total (s, temps réel) pour les NB_INSTANCES instances
+TIME_LIMIT=55000          # budget total (s, temps réel) pour les NB_INSTANCES instances
 GUROBI_THREADS=1         # par worker : les 4 cœurs sont déjà utilisés par 4 instances en parallèle
 GUROBI_MEM_GB=8          # limite mémoire Gurobi PAR worker, en Go (vide = aucune limite)
 
