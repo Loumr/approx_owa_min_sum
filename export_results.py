@@ -203,14 +203,16 @@ def _first(g, col):
     return g[col].iloc[0] if col in g and g[col].notna().any() else np.nan
 
 
-def summarize(df):
+def summarize(df, nb_instances=None):
     """Une ligne par configuration avec les statistiques sur les instances."""
     rows = []
     for key, g in _groups(df):
         t, v = g["time_s"], g["best_value"]
         row = dict(zip(CONFIG_KEYS, key))
         row.update({
+            "Nb instances prévues": max(nb_instances, len(g)) if nb_instances else np.nan,
             "Nb instances": len(g),
+            "Nb non démarrées": max(nb_instances - len(g), 0) if nb_instances else np.nan,
             "Nb terminées": int((g["status"] == "completed").sum()),
             "Nb timeout": int((g["status"] == "timeout").sum()),
             "Autre statut": int((~g["status"].isin(["completed", "timeout"])).sum()),
@@ -332,12 +334,13 @@ def export_raw(df, out_dir="../results/excel/raw", include_assignment=True):
     return paths
 
 
-def export_summary(df, out_path="../results/excel/summary_all.xlsx", per_config_dir=None):
+def export_summary(df, out_path="../results/excel/summary_all.xlsx", per_config_dir=None,
+                   nb_instances=30):
     """
     Résumé global (une ligne par configuration), avec un onglet par type de poids
     s'il y en a plusieurs. Avec per_config_dir, écrit aussi un résumé par configuration.
     """
-    summary = summarize(df)
+    summary = summarize(df, nb_instances)
     sheets = {"Toutes configurations": summary}
     if summary[RAW_LABELS["w_type"]].nunique() > 1:
         for w_type, g in summary.groupby(RAW_LABELS["w_type"]):
@@ -355,11 +358,11 @@ def export_summary(df, out_path="../results/excel/summary_all.xlsx", per_config_
     return paths
 
 
-def export_all(results_dir="../results/assignment", out_dir="../results/excel",
+def export_all(results_dir="../results/assignment", out_dir="../results/excel", nb_instances=30,
                summary_per_config=False, include_assignment=True):
     df = load_results(results_dir)
     raw = export_raw(df, os.path.join(out_dir, "raw"), include_assignment=include_assignment)
-    summ = export_summary(df, os.path.join(out_dir, "summary_all.xlsx"),
+    summ = export_summary(df, os.path.join(out_dir, "summary_all.xlsx"), nb_instances=nb_instances,
                           per_config_dir=os.path.join(out_dir, "summary") if summary_per_config else None)
     print(f"{len(df)} ligne(s) lue(s), {_groups(df).ngroups} configuration(s)")
     print(f"{len(raw)} fichier(s) brut(s) dans {os.path.join(out_dir, 'raw')}")
@@ -377,9 +380,11 @@ if __name__ == "__main__":
     parser.add_argument("--out-dir", default="../results/excel")
     parser.add_argument("--summary-per-config", action="store_true",
                         help="écrit aussi un fichier de résumé par configuration")
+    parser.add_argument("--nb-instances", type=int, default=30,
+                        help="instances prévues par configuration ; 0 : celles trouvées")
     parser.add_argument("--no-assignment", action="store_true",
                         help="n'inclut pas la colonne d'affectation dans les fichiers bruts")
     args = parser.parse_args()
 
     export_all(args.results_dir, args.out_dir, summary_per_config=args.summary_per_config,
-               include_assignment=not args.no_assignment)
+               include_assignment=not args.no_assignment, nb_instances=args.nb_instances or None)

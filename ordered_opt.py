@@ -11,6 +11,7 @@ import pandas as pd
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from instance_generator import generate_instances
+from resume import RERUN_MODES, append_row, prepare_resume
 
 
 class TimeLimitReached(Exception):
@@ -203,14 +204,12 @@ def solve_one(instance, delta, eps, deadline):
  
 def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                        results_dir="../results/assignment", save_solutions=True,
-                       n_workers=None, time_limit=None):
+                       n_workers=None, time_limit=None, rerun="unfinished"):
     path = results_path(results_dir, n, delta, eps, w_type)
     done = set()
     if save:
         os.makedirs(results_dir, exist_ok=True)
-        if os.path.exists(path):
-            done = set(pd.read_csv(path)["instance"].astype(str))
-            print(f"Resuming: {len(done)} instance(s) already in {path}")
+        done = prepare_resume(path, rerun)
 
     instances = generate_instances(n, nb_instances, w_type, cost_seed=seed)
     todo = [inst for inst in instances if str(inst["instance"]) not in done]
@@ -247,8 +246,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
             rows.append(row)
 
             if save:
-                pd.DataFrame([row]).to_csv(path, mode="a", index=False,
-                                           header=not os.path.exists(path))
+                append_row(path, row)
             val = f"{res['best_value']:.2f}" if res["best_value"] is not None else "none"
             print(f"[chen_appendixC] n={n}, instance {res['instance']} {res['status']} "
                   f"(value={val}, {res['num_t']} vectors, {res['time_s']:.1f}s)", flush=True)
@@ -273,6 +271,8 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type=int, default=None,
                         help="number of worker processes (default: cores allocated by OAR)")
     parser.add_argument("--output", default=None)
+    parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished")
+
     args = parser.parse_args()
 
     results_dir = os.path.dirname(args.output) if args.output else "../results/assignment"
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     dfs = [test_approx_assign(n=n, delta=args.delta, eps=args.eps, w_type=args.w_type,
                               nb_instances=args.nb_instances, save=True, seed=args.seed,
                               results_dir=results_dir, n_workers=args.workers,
-                              time_limit=time_limit)
+                              time_limit=time_limit, rerun=args.rerun)
            for n in args.n]
 
     if args.output:

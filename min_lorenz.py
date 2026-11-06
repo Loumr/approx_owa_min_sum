@@ -20,6 +20,7 @@ Instances sauvegardées dans --instances-dir (voir instance_store.py).
 
 import os
 
+# AVANT l'import de numpy : un seul thread de calcul par worker
 for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_var, "1")
 
@@ -33,6 +34,7 @@ from scipy.optimize import linear_sum_assignment
 
 from instance_generator import generate_instances
 from instance_store import instance_fingerprint, save_instances
+from resume import RERUN_MODES, append_row, prepare_resume
 
 METHODS = ("exact", "min_lorenz", "min_lorenz_v2")
 
@@ -223,7 +225,8 @@ def solve_one(instance, method, eps, deadline, gurobi_threads, gurobi_mem_gb=Non
 
 def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers=None,
         results_dir="../results/assignment", instances_dir="../results/instances",
-        gurobi_threads=1, gurobi_mem_gb=None, gurobi_legacy=False, save_solutions=True):
+        gurobi_threads=1, gurobi_mem_gb=None, gurobi_legacy=False, save_solutions=True,
+        rerun="unfinished"):
     if method not in METHODS:
         raise ValueError(f"method doit être parmi {METHODS}, reçu : {method}")
     if method == "exact":
@@ -231,10 +234,7 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
 
     path = results_path(results_dir, method, n, eps, w_type)
     os.makedirs(results_dir, exist_ok=True)
-    done = set()
-    if os.path.exists(path):
-        done = set(pd.read_csv(path)["instance"].astype(str))
-        print(f"Reprise : {len(done)} instance(s) déjà dans {path}")
+    done = prepare_resume(path, rerun)
 
     instances = generate_instances(n, nb_instances, w_type, cost_seed=seed)
     save_instances(instances, n, w_type, seed, instances_dir)
@@ -265,13 +265,13 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
             if save_solutions:
                 row["assignment"] = (" ".join(map(str, res["best_sol"]))
                                      if res["best_sol"] is not None else "")
-            pd.DataFrame([row]).to_csv(path, mode="a", index=False, header=not os.path.exists(path))
+            append_row(path, row)
             print(f"[{method}] n={n}, instance {res['instance']} {res['status']} "
                   f"(valeur={res['best_value']:.2f}, {res['time_s']:.1f}s)", flush=True)
 
     if not_started:
         print(f"Budget épuisé : {not_started} instance(s) non démarrée(s)", flush=True)
-    return pd.read_csv(path)
+    return pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
 
 
 if __name__ == "__main__":
@@ -283,7 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("--w-type", default="linear_weights")
     parser.add_argument("--nb-instances", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--time-limit", type=float, default=55000.0,
+    parser.add_argument("--time-limit", type=float, default=3600.0,
                         help="budget total (s, temps réel) pour les instances d'un n ; <= 0 : illimité")
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--gurobi-threads", type=int, default=1)
@@ -291,6 +291,9 @@ if __name__ == "__main__":
                         help="limite mémoire Gurobi par worker, en Go (défaut : aucune)")
     parser.add_argument("--gurobi-legacy-params", action="store_true",
                         help="Method=1, Presolve=0, Crossover=0, NumericFocus=3 (version d'origine)")
+    parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished",
+                        help="unfinished : relance les instances absentes ou non terminées ; "
+                             "all : tout relancer ; none : seulement les absentes")
     parser.add_argument("--results-dir", default="../results/assignment")
     parser.add_argument("--instances-dir", default="../results/instances")
     args = parser.parse_args()
@@ -300,4 +303,5 @@ if __name__ == "__main__":
             time_limit=args.time_limit if args.time_limit > 0 else None,
             n_workers=args.workers, results_dir=args.results_dir,
             instances_dir=args.instances_dir, gurobi_threads=args.gurobi_threads,
-            gurobi_mem_gb=args.gurobi_mem_gb, gurobi_legacy=args.gurobi_legacy_params)
+            gurobi_mem_gb=args.gurobi_mem_gb, gurobi_legacy=args.gurobi_legacy_params,
+            rerun=args.rerun)

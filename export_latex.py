@@ -90,7 +90,7 @@ def _method_order(method):
 # Statistics
 # ---------------------------------------------------------------------------
 
-def _stats(g):
+def _stats(g, nb_instances=None):
     """Statistics of one method on one (weights, n) cell."""
     exact_ratio = g["ratio_to_exact"]
     bound = g["ratio_bound_high"]
@@ -102,17 +102,20 @@ def _stats(g):
         "ratio_mean": ratio.mean() if ratio.notna().any() else np.nan,
         "ratio_max": ratio.max() if ratio.notna().any() else np.nan,
         "n_solved": int((g["status"] == "completed").sum()),
-        "n_total": len(g),
+        "n_started": len(g),
+        # Denominator: number of instances of the experiment (not only those started)
+        "n_total": max(nb_instances, len(g)) if nb_instances else len(g),
         "ratio_from_bound": bool((exact_ratio.isna() & bound.notna()).any()),
         "ratio_partial": 0 < ratio.notna().sum() < len(g),
         "is_exact": g["method"].iloc[0] == "exact",
     }
 
 
-def compute_comparison(df, methods=None):
+def compute_comparison(df, methods=None, nb_instances=None):
     """
     One row per (w_type, n, method variant) with the statistics used in the tables.
     methods: optional list of method names to keep (e.g. ["exact", "min_lorenz"]).
+    nb_instances: number of instances of the experiment (denominator of "Solved").
     """
     if methods is not None:
         df = df[df["method"].isin(methods)]
@@ -121,7 +124,7 @@ def compute_comparison(df, methods=None):
             ["w_type", "n", "method", "delta", "eps"], dropna=False, sort=True):
         row = {"w_type": w_type, "n": int(n), "method": method, "delta": delta, "eps": eps,
                "label": method_label(method, delta, eps)}
-        row.update(_stats(g))
+        row.update(_stats(g, nb_instances))
         rows.append(row)
     out = pd.DataFrame(rows)
     out["_order"] = out["method"].map(_method_order)
@@ -195,8 +198,11 @@ def _notes(comp, metrics, short_headers=False):
                          "returned by Gurobi when it hit its time limit.")
         if comp["ratio_partial"].any():
             notes.append(DDAGGER + " Computed on the instances for which a reference value is available.")
-    if any(m.startswith("time") for m in metrics) and (comp["n_solved"] < comp["n_total"]).any():
+    if any(m.startswith("time") for m in metrics) and (comp["n_solved"] < comp["n_started"]).any():
         notes.append("Times include the instances stopped at the time limit.")
+    if (comp["n_started"] < comp["n_total"]).any():
+        notes.append("Averages are computed over the instances that were started; instances "
+                     "not started within the time budget are counted as unsolved.")
     if "solved" in metrics:
         notes.append(("Sol." if short_headers else "Solved") + ": instances completed within the time limit "
                      "(optimality proved for the exact solver).")
@@ -295,7 +301,7 @@ def _table_long(comp, metrics, time_decimals, ratio_decimals, bold_best,
 
 def latex_comparison_table(results, out_path=None, layout="wide",
                            metrics=("time", "ratio_mean", "ratio_max", "solved"),
-                           methods=None, w_types=None, n_values=None,
+                           methods=None, w_types=None, n_values=None, nb_instances=30,
                            time_decimals=2, ratio_decimals=4, bold_best=True, resize=False,
                            font_size="small", tabcolsep=None, short_headers=False,
                            two_line_names=True, landscape=False,
@@ -309,6 +315,8 @@ def latex_comparison_table(results, out_path=None, layout="wide",
     layout      "wide": one row per n, one column group per method
                 "long": one row per (n, method), one column per metric
     metrics     among: time, time_median, time_max, ratio_mean, ratio_max, solved
+    nb_instances    number of instances per configuration, used as denominator of "Solved"
+                (None: number of instances found in the results)
     methods     method names to keep, e.g. ["exact", "chen_appendixC", "min_lorenz"] (default: all)
     w_types     weight types to keep (default: all); n_values: values of n to keep (default: all)
     bold_best   bold the best (smallest) time and ratio of each n
@@ -333,7 +341,7 @@ def latex_comparison_table(results, out_path=None, layout="wide",
         df = df[df["w_type"].isin(w_types)]
     if n_values is not None:
         df = df[df["n"].isin(n_values)]
-    comp = compute_comparison(df, methods)
+    comp = compute_comparison(df, methods, nb_instances)
     if comp.empty:
         raise ValueError("No results match the selection")
 
@@ -378,6 +386,8 @@ if __name__ == "__main__":
     parser.add_argument("--methods", nargs="+", default=None)
     parser.add_argument("--w-types", nargs="+", default=None)
     parser.add_argument("--n", type=int, nargs="+", default=None)
+    parser.add_argument("--nb-instances", type=int, default=30,
+                        help="instances per configuration (denominator of 'Solved'); 0: those found")
     parser.add_argument("--time-decimals", type=int, default=2)
     parser.add_argument("--ratio-decimals", type=int, default=4)
     parser.add_argument("--no-bold", action="store_true")
@@ -393,7 +403,8 @@ if __name__ == "__main__":
 
     latex_comparison_table(args.results_dir, out_path=args.out, layout=args.layout,
                            metrics=args.metrics, methods=args.methods, w_types=args.w_types,
-                           n_values=args.n, time_decimals=args.time_decimals,
+                           n_values=args.n, nb_instances=args.nb_instances or None,
+                           time_decimals=args.time_decimals,
                            ratio_decimals=args.ratio_decimals, bold_best=not args.no_bold,
                            resize=args.resize, font_size=args.font_size, tabcolsep=args.tabcolsep,
                            short_headers=args.short_headers,
