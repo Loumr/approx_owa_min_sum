@@ -143,6 +143,14 @@ def explore(l, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, cand
     
     for j in range(min_j, len(candidates)):
         c = candidates[j]
+        # if candidate == 0.0, skip the remaining recursive calls, as they will all be 0.0 and will not yield a better solution
+        if c == 0.0:
+            prev_fixed[l:] = 0.0 # Set the remaining elements to 0
+            np.multiply(cost_matrix, w[POS[l]], out=tmp)
+            np.add(buffers[l], tmp, out=buffers[p])
+            explore(p, prev_fixed, POS, w, cost_matrix, min_sum_func, state, j, candidates, buffers, coefs, tmp)
+            continue
+
         prev_fixed[l] = c
         np.subtract(cost_matrix, c, out=tmp)
         np.maximum(tmp, 0.0, out=tmp)
@@ -189,7 +197,7 @@ def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, dead
     wp = np.asarray(w, dtype=float)[POS] # keep only weights at k in POS
     coefs = np.append(wp[:-1] - wp[1:], wp[-1])
     buffers = np.zeros((p+1,) + cost_matrix.shape)  # buffers[0] = 0; keeps track of (w_l - w_next(l))(v-t_l) for each value of t and each value v in cost matrix
-    base_cost = 1 / (1 + eps) ** np.arange(max_j + 1) # possible base values of threshold vector (to be multiplied by rho)
+    base_cost = np.append(1 / (1 + eps) ** np.arange(max_j + 1), 0.0) # possible base values of threshold vector (to be multiplied by rho)
     tmp = np.empty(cost_matrix.shape)
 
     status = "completed"
@@ -299,7 +307,7 @@ def results_path(results_dir, n, delta, eps, w_type, loop=False):
     if loop:
         return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}_loop.csv")
     return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv")
-    i
+    
 
 
 def n_available_cores():
@@ -349,6 +357,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
     print(f"n={n}: {len(todo)} instance(s) to solve on {n_workers} worker(s), "
           f"budget {time_limit if time_limit else 'unlimited'} s", flush=True)
 
+    method = "chen_appendixC_loop" if loop else "chen_appendixC"
     rows, not_started = [], 0
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
         futures = [ex.submit(solve_one, inst, delta, eps, deadline, loop) for inst in todo]
@@ -359,7 +368,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                 continue
 
             row = {
-                "method": "chen_appendixC",
+                "method": method,
                 "n": n, "delta": delta, "eps": eps, "w_type": w_type, "seed": seed,
                 "instance": res["instance"],
                 "status": res["status"],
@@ -379,7 +388,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
             if save:
                 append_row(path, row)
             val = f"{res['best_value']:.2f}" if res["best_value"] is not None else "none"
-            print(f"[chen_appendixC] n={n}, instance {res['instance']} {res['status']} "
+            print(f"[{method}] n={n}, instance {res['instance']} {res['status']} "
                   f"(value={val}, {res['num_t']} vectors, {res['time_s']:.1f}s)", flush=True)
 
     if not_started:
@@ -403,7 +412,7 @@ if __name__ == "__main__":
                         help="number of worker processes (default: cores allocated by OAR)")
     parser.add_argument("--output", default=None)
     parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished")
-    parser.add_argument("--loop", action="store_true")
+    parser.add_argument("--loop", action="store_true", help="use the iterative version (combinations_with_replacement) instead of the recursive one")
 
     args = parser.parse_args()
 
@@ -413,7 +422,7 @@ if __name__ == "__main__":
     dfs = [test_approx_assign(n=n, delta=args.delta, eps=args.eps, w_type=args.w_type,
                               nb_instances=args.nb_instances, save=True, seed=args.seed,
                               results_dir=results_dir, n_workers=args.workers,
-                              time_limit=time_limit, rerun=args.rerun)
+                              time_limit=time_limit, rerun=args.rerun, loop=args.loop)
            for n in args.n]
 
     if args.output:
