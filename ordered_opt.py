@@ -294,9 +294,12 @@ def approx_ordered_loop(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum,
 # Experiments: one row per instance, appended to the CSV as soon as it is done
 # ---------------------------------------------------------------------------
  
-def results_path(results_dir, n, delta, eps, w_type):
+def results_path(results_dir, n, delta, eps, w_type, loop=False):
     """One file per configuration, so runs with different parameters never overwrite each other."""
+    if loop:
+        return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}_loop.csv")
     return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv")
+    i
 
 
 def n_available_cores():
@@ -333,7 +336,7 @@ def solve_one(instance, delta, eps, deadline, loop=False):
 def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                        results_dir="../results/assignment", save_solutions=True,
                        n_workers=None, time_limit=None, rerun="unfinished", loop=False):
-    path = results_path(results_dir, n, delta, eps, w_type)
+    path = results_path(results_dir, n, delta, eps, w_type, loop)
     done = set()
     if save:
         os.makedirs(results_dir, exist_ok=True)
