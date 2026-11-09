@@ -1,6 +1,7 @@
-#run_files/
+run_files/
 OAR.*.stderr
 OAR.*.stdout
 *.xlsx
 *.csv
 __pycache__/
+params*

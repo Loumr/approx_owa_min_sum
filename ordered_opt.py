@@ -307,23 +307,32 @@ def n_available_cores():
         return os.cpu_count()
 
 
-def solve_one(instance, delta, eps, deadline):
+def solve_one(instance, delta, eps, deadline, loop=False):
     """Run the algorithm on one instance, return a dict with the results (or None if the time budget is already reached)."""
     if deadline is not None and time.monotonic() >= deadline:
         return None  # budget reached before starting: skip this instance
-    t0 = time.perf_counter()
-    best_sol, best_value, POS, num_t, status = approx_ordered(
-        instance["cost_matrix"], instance["W"], delta=delta, eps=eps, deadline=deadline)
-    return {
-        "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
-        "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
-    }
+    if not loop:
+        t0 = time.perf_counter()
+        best_sol, best_value, POS, num_t, status = approx_ordered(
+            instance["cost_matrix"], instance["W"], delta=delta, eps=eps, deadline=deadline)
+        return {
+            "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
+            "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
+        }
+    else:
+        t0 = time.perf_counter()
+        best_sol, best_value, POS, num_t, status = approx_ordered_loop(
+            instance["cost_matrix"], instance["W"], delta=delta, eps=eps, deadline=deadline)
+        return {
+            "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
+            "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
+        }
  
 
  
 def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                        results_dir="../results/assignment", save_solutions=True,
-                       n_workers=None, time_limit=None, rerun="unfinished"):
+                       n_workers=None, time_limit=None, rerun="unfinished", loop=False):
     path = results_path(results_dir, n, delta, eps, w_type)
     done = set()
     if save:
@@ -339,7 +348,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
 
     rows, not_started = [], 0
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
-        futures = [ex.submit(solve_one, inst, delta, eps, deadline) for inst in todo]
+        futures = [ex.submit(solve_one, inst, delta, eps, deadline, loop) for inst in todo]
         for fut in as_completed(futures):
             res = fut.result()
             if res is None:
@@ -391,6 +400,7 @@ if __name__ == "__main__":
                         help="number of worker processes (default: cores allocated by OAR)")
     parser.add_argument("--output", default=None)
     parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished")
+    parser.add_argument("--loop", action="store_true")
 
     args = parser.parse_args()
 
