@@ -13,6 +13,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from instance_generator import generate_instances
 from resume import RERUN_MODES, append_row, prepare_resume
 
+from itertools import combinations_with_replacement
+
 
 class TimeLimitReached(Exception):
     pass
@@ -62,7 +64,7 @@ def build_pos(n, delta):
 
 
 
-def explore(l, prev_fixed, POS, eps, n, w, cost_matrix, min_sum_func, state, max_j):
+def explore(l, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, candidates, buffers, coefs, tmp):
     """
     Recursive function to explore the possible values of t and find the optimal solution (from Chakrabarty and Swamy).
     
@@ -81,44 +83,73 @@ def explore(l, prev_fixed, POS, eps, n, w, cost_matrix, min_sum_func, state, max
         # Check if the time limit has been reached
         if state["deadline"] is not None and time.monotonic() >= state["deadline"]:
             raise TimeLimitReached
-        
-        t = prev_fixed.copy()
+        '''
+        #t = prev_fixed.copy()
+        t = prev_fixed
 
         # Check if the current t is a valid solution (decreasing, non-negative, and of size p)
-        if np.all(t[:-1] >= t[1:]) and np.all(t >= 0) and np.shape(t)[0] == p:
+        #if np.all(t[:-1] >= t[1:]) and np.all(t >= 0) and np.shape(t)[0] == p:
 
-            # Modified costs based on t
-            costs_t = np.zeros(cost_matrix.shape, dtype=float)
-            for k in range(p-1):
-                costs_t += (w[POS[k]] - w[POS[k+1]]) * np.maximum(cost_matrix - t[k], 0)
+        # Modified costs based on t
+        costs_t = np.zeros(cost_matrix.shape, dtype=float)
+        for k in range(p-1):
+            costs_t += (w[POS[k]] - w[POS[k+1]]) * np.maximum(cost_matrix - t[k], 0)
 
-            costs_t += w[POS[p-1]] * np.maximum(cost_matrix - t[p-1], 0) 
-            
-            # Solve the optimization problem with the modified costs
-            sol, _ = min_sum_func(costs_t)
-            # Compute the OWA value for the solution
-            value = owa(cost_matrix[np.arange(len(sol)), sol], w)
-            state["num_t"] += 1
-
-            if state["best_value"] is None or value < state["best_value"]:
-                state["best_sol"] = sol.copy()
-                state["best_value"] = value
-
-            return 
-
-        else:
-            raise ValueError("t is not a valid solution")
+        costs_t += w[POS[p-1]] * np.maximum(cost_matrix - t[p-1], 0) 
         
+        # Solve the optimization problem with the modified costs
+        sol, _ = min_sum_func(costs_t)
+        # Compute the OWA value for the solution
+        value = owa(cost_matrix[np.arange(len(sol)), sol], w)
+        state["num_t"] += 1
 
-    o1 = prev_fixed[0]
+        if state["best_value"] is None or value < state["best_value"]:
+            state["best_sol"] = sol.copy()
+            state["best_value"] = value
+
+        return 
+
+        #else:
+        #raise ValueError("t is not a valid solution")
+        
+    t1 = prev_fixed[0]
     last_fixed = prev_fixed[l-1]
+    min_j = np.ceil(np.log(t1 / last_fixed) / np.log(1 + eps) - 1e-9) # if last_fixed = 0, then the algorithm will not explore any further, as all remaining candidates will be 0.0
+    # 1e-9 is added to avoid floating point issues when t1 / last_fixed is very close to a power of (1 + eps)
+ 
+    #candidates.append(0.0)
 
-    candidates = [o1 / (1 + eps) ** j for j in range(max_j + 1) if o1 / (1 + eps) ** j <= last_fixed] 
-    candidates.append(0.0)
-
-    for candidate in candidates:
+    for candidate in candidates[min_j:]:
         prev_fixed[l] = candidate
-        explore(l+1, prev_fixed, POS, eps, n, w, cost_matrix, min_sum_func, state, max_j)
+        sum_costs_t += (w[POS[l]] - w[POS[l+1]]) * np.maximum(cost_matrix - candidate, 0)
+        explore(l+1, prev_fixed, POS, eps, n, w, cost_matrix, min_sum_func, state, min_j, candidates, sum_costs_t)
+
+    # if candidate == 0.0, skip the remaining recursive calls, as they will all be 0.0 and will not yield a better solution
+    prev_fixed[l:] = 0.0 * (p - l)  # Set the remaining elements to 0
+    sum_costs_t += (w[POS[l]] - w[POS[p-1]]) * np.maximum(cost_matrix - candidate, 0)
+    explore(p, prev_fixed, POS, eps, n, w, cost_matrix, min_sum_func, state, min_j, candidates, sum_costs_t)
+    '''
+        # Solve the optimization problem with the modified costs
+        sol, _ = min_sum_func(buffers[p]) # buffers[p] contains the sum of costs on t
+        # Compute the OWA value for the solution
+        value = owa(cost_matrix[np.arange(len(sol)), sol], w)
+        state["num_t"] += 1
+
+        if state["best_value"] is None or value < state["best_value"]:
+            state["best_sol"] = sol.copy()
+            state["best_value"] = value
+
+        return 
+    
+    for j in range(min_j, len(candidates)):
+        c = candidates[j]
+        prev_fixed[l] = c
+        np.subtract(cost_matrix, c, out=tmp)
+        np.maximum(tmp, 0.0, out=tmp)
+        tmp *= coefs[l] # multiply matrix costs_t by (w_l - w_next(l))
+        np.add(buffers[l], tmp, out=buffers[l+1])  # add costs_t to the sum already computed in buffers[l] and put it in buffers[l+1]
+        explore(l+1, prev_fixed, POS, w, cost_matrix, min_sum_func, state, j, candidates, buffers, coefs, tmp)
+
 
 
 
@@ -137,23 +168,29 @@ def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, dead
     n = len(w)
 
     # Compute POS and p
-
     POS = build_pos(n, delta)
     p = len(POS)
 
     state = {"best_sol": None, "best_value": None, "num_t": 0, "deadline": deadline}
 
-    # Case o1 = 0
+    # Case rho = 0
     sol, val = min_sum_func((cost_matrix > 0).astype(float))
     if val == 0:
         return sol, val, POS, 1, "completed"
 
-    # Case o1 > 0
+    # Case rho > 0
     c_min, c_max = cost_matrix[cost_matrix > 0].min(), cost_matrix.max()
     k_min = int(np.floor(np.log(c_min) / np.log(1 + eps)))
     k_max = int(np.ceil(np.log(c_max) / np.log(1 + eps)))
     S = [(1 + eps) ** k for k in range(k_min, k_max + 1)]  
     max_j = int(np.floor(np.log((1 + eps) * n / eps) / np.log(1 + eps)))
+    min_j = 0
+
+    wp = np.asarray(w, dtype=float)[POS] # keep only weights at k in POS
+    coefs = np.append(wp[:-1] - wp[1:], wp[-1])
+    buffers = np.zeros((p+1,) + cost_matrix.shape)  # buffers[0] = 0; keeps track of (w_l - w_next(l))(v-t_l) for each value of t and each value v in cost matrix
+    base_cost = 1 / (1 + eps) ** np.arange(max_j + 1) # possible base values of threshold vector (to be multiplied by rho)
+    tmp = np.empty(cost_matrix.shape)
 
     status = "completed"
     try:
@@ -164,11 +201,93 @@ def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, dead
             prev_fixed = np.zeros(p)
             prev_fixed[0] = rho
 
-            explore(1, prev_fixed, POS, eps, n, w, cost_matrix, min_sum_func, state, max_j)
+            #candidates = [rho / (1 + eps) ** j for j in range(max_j + 1)] 
+            candidates = rho * base_cost
+            np.subtract(cost_matrix, rho, out=tmp)
+            np.maximum(tmp, 0.0, out=tmp)
+            np.multiply(tmp, coefs[0], out=buffers[1])
+
+            explore(1, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, candidates, buffers, coefs, tmp)
+
     except TimeLimitReached:
         status = "timeout"
 
     return state["best_sol"], state["best_value"], POS, state["num_t"], status
+
+
+
+
+def approx_ordered_loop(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, deadline=None):
+    n = len(w)
+    POS = build_pos(n, delta)
+    p = len(POS)
+
+    state = {"best_sol": None, "best_value": None, "num_t": 0, "deadline": deadline}
+
+    # Case rho = 0
+    sol, val = min_sum_func((cost_matrix > 0).astype(float))
+    if val == 0:
+        return sol, val, POS, 1, "completed"
+
+    # Case rho > 0
+    c_min, c_max = cost_matrix[cost_matrix > 0].min(), cost_matrix.max()
+    k_min = int(np.floor(np.log(c_min) / np.log(1 + eps)))
+    k_max = int(np.ceil(np.log(c_max) / np.log(1 + eps)))
+    S = [(1 + eps) ** k for k in range(k_min, k_max + 1)]
+    max_j = int(np.floor(np.log((1 + eps) * n / eps) / np.log(1 + eps)))
+
+    wp = np.asarray(w, dtype=float)[POS]
+    coefs = np.append(wp[:-1] - wp[1:], wp[-1])        # coefficient of term k
+    buffers = np.zeros((p + 1,) + cost_matrix.shape)   # buffers[l] = sum of terms 0..l-1
+    base_cost = np.append((1 + eps) ** -np.arange(max_j + 1), 0.0)  # 0 last
+    idx = range(len(base_cost))
+    rows = np.arange(cost_matrix.shape[0])
+
+    status = "completed"
+    try:
+        for rho in S:
+            candidates = base_cost * rho
+
+            # Term 0: t[0] = rho
+            np.subtract(cost_matrix, rho, out=buffers[1])
+            np.maximum(buffers[1], 0.0, out=buffers[1])
+            buffers[1] *= coefs[0]
+
+            prev = None
+            for s in combinations_with_replacement(idx, p - 1):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeLimitReached
+
+                # First position that differs from the previous tuple
+                start = 0
+                if prev is not None:
+                    while s[start] == prev[start]:
+                        start += 1
+
+                # Only recompute the terms after the shared prefix
+                for i in range(start, p - 1):
+                    out = buffers[i + 2]
+                    np.subtract(cost_matrix, candidates[s[i]], out=out)
+                    np.maximum(out, 0.0, out=out)
+                    out *= coefs[i + 1]
+                    out += buffers[i + 1]
+
+                sol, _ = min_sum_func(buffers[p])
+                value = owa(cost_matrix[rows, sol], w)
+                state["num_t"] += 1
+                if state["best_value"] is None or value < state["best_value"]:
+                    state["best_sol"] = sol.copy()
+                    state["best_value"] = value
+
+                prev = s
+
+    except TimeLimitReached:
+        status = "timeout"
+
+    return state["best_sol"], state["best_value"], POS, state["num_t"], status
+ 
+                
+
 
 
 # ---------------------------------------------------------------------------
