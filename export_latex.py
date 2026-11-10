@@ -25,7 +25,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from export_results import load_results
+from export_results import load_results, split_method
 
 METRICS = {
     "time": "Avg. time (s)",
@@ -58,8 +58,14 @@ def method_label(method, delta=np.nan, eps=np.nan):
     """Readable (LaTeX) name of a method and its parameters."""
     if method == "exact":
         return "Exact (Gurobi)"
-    if method == "chen_appendixC":
-        return rf"Chen et al. ($\delta={_fmt_param(delta)}$, $\varepsilon={_fmt_param(eps)}$)"
+    base, alpha = split_method(method)
+    if base in ("chen_appendixC", "chen_appendixC_loop"):
+        # Une seule parenthèse " (" dans le libellé : _two_lines coupe dessus
+        name = "Chen et al." + (", iterative" if base.endswith("_loop") else "")
+        params = [rf"$\delta={_fmt_param(delta)}$", rf"$\varepsilon={_fmt_param(eps)}$"]
+        if pd.notna(alpha) and alpha > 0:
+            params.append(rf"$\alpha={_fmt_param(alpha)}$")
+        return f"{name} ({', '.join(params)})"
     if method in ("min_lorenz", "min_lorenz_v2"):
         name = "Min-Lorenz" + (" v2" if method == "min_lorenz_v2" else "")
         if pd.notna(eps) and eps > 0:
@@ -83,7 +89,11 @@ def _escape(text):
 
 
 def _method_order(method):
-    return {"exact": 0, "chen_appendixC": 1, "min_lorenz": 2, "min_lorenz_v2": 3}.get(method, 9)
+    """Exact, puis Chen et al. (récursif, itératif, puis par alpha croissant), puis Min-Lorenz."""
+    base, alpha = split_method(method)
+    rank = {"exact": 0, "chen_appendixC": 1, "chen_appendixC_loop": 2,
+            "min_lorenz": 3, "min_lorenz_v2": 4}.get(base, 9)
+    return rank + (alpha / 1000 if pd.notna(alpha) else 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +327,8 @@ def latex_comparison_table(results, out_path=None, layout="wide",
     metrics     among: time, time_median, time_max, ratio_mean, ratio_max, solved
     nb_instances    number of instances per configuration, used as denominator of "Solved"
                 (None: number of instances found in the results)
-    methods     method names to keep, e.g. ["exact", "chen_appendixC", "min_lorenz"] (default: all)
+    methods     method names to keep, e.g. ["exact", "chen_appendixC", "chen_appendixC_alpha0.5",
+                "chen_appendixC_loop", "min_lorenz"] (default: all)
     w_types     weight types to keep (default: all); n_values: values of n to keep (default: all)
     bold_best   bold the best (smallest) time and ratio of each n
     resize      wrap the tabular in \\resizebox{\\textwidth}{!}{...} (needs graphicx)

@@ -439,7 +439,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
     if loop:
         method = "chen_appendixC_loop"
     else:
-        method = "chen_appendixC" if alpha==0.0 else "chen_appendixC_alpha"
+        method = "chen_appendixC"
     if alpha != 0.0:
         method += f"_alpha{alpha:g}"
     rows, not_started = [], 0

@@ -40,6 +40,34 @@ INSTANCE_KEYS = CONFIG_KEYS + ["seed", "instance"]
 MATCH_KEYS = ["w_type", "n", "seed", "instance"]   # pour retrouver l'exact d'une instance
 EXACT_METHOD = "exact"
 LOOP_SUFFIX = "_loop"   # version itérative de ordered_opt.py (--loop)
+CHEN_PREFIX = "chen_appendixC"
+# Suffixe(s) _alpha... en fin de nom ("chen_appendixC_alpha", "chen_appendixC_alpha_alpha0.5", ...)
+_ALPHA_SUFFIX_RE = re.compile(r"(_alpha[0-9.eE+\-]*)+$")
+_ALPHA_VALUE_RE = re.compile(r"_alpha([0-9.]*[0-9](?:[eE][+\-]?[0-9]+)?)")
+
+
+def split_method(method):
+    """
+    Sépare un nom de méthode en (base, alpha) :
+        "chen_appendixC"               -> ("chen_appendixC", 0.0)
+        "chen_appendixC_loop"          -> ("chen_appendixC_loop", 0.0)
+        "chen_appendixC_alpha0.5"      -> ("chen_appendixC", 0.5)
+        "chen_appendixC_alpha_alpha1"  -> ("chen_appendixC", 1.0)
+    alpha vaut NaN pour les méthodes qui n'ont pas ce paramètre (exact, min_lorenz...).
+    """
+    method = str(method)
+    if not method.startswith(CHEN_PREFIX):
+        return method, np.nan
+    values = _ALPHA_VALUE_RE.findall(method)
+    alpha = float(values[-1]) if values else 0.0
+    return _ALPHA_SUFFIX_RE.sub("", method), alpha
+
+
+def method_name(base, alpha):
+    """Nom canonique : la base, suivie de _alpha{alpha} si alpha > 0."""
+    if pd.notna(alpha) and alpha > 0:
+        return f"{base}_alpha{alpha:g}"
+    return base
 
 # Libellés lisibles (colonnes absentes ou entièrement vides ignorées)
 RAW_LABELS = {
@@ -48,6 +76,7 @@ RAW_LABELS = {
     "n": "n",
     "delta": "delta",
     "eps": "eps",
+    "alpha": "alpha",
     "seed": "Graine",
     "instance": "Instance",
     "instance_hash": "Empreinte instance",
@@ -110,6 +139,7 @@ def load_results(results_dir="../results/assignment", patterns=PATTERNS):
     from_loop_file = df["source_file"].str.endswith(LOOP_SUFFIX + ".csv")
     fix = from_loop_file & df["method"].notna() & ~method.str.endswith(LOOP_SUFFIX)
     df.loc[fix, "method"] = method[fix] + LOOP_SUFFIX
+    df = _normalize_alpha(df)
     # Fichiers écrits par d'anciennes versions, sans colonne 'status' : ces versions n'avaient
     # pas de limite de temps et n'écrivaient une ligne qu'une fois l'instance terminée, donc
     # une ligne avec une valeur est une instance terminée.
@@ -124,6 +154,36 @@ def load_results(results_dir="../results/assignment", patterns=PATTERNS):
     keys = [k for k in INSTANCE_KEYS if k in df.columns]
     df = df.drop_duplicates(subset=keys, keep="last")
     return sort_results(add_exact_reference(df))
+
+
+def _normalize_alpha(df):
+    """
+    Variantes avec alpha de ordered_opt.py : un nom canonique par valeur d'alpha.
+
+    Selon la version de ordered_opt.py, la méthode s'appelle "chen_appendixC_alpha",
+    "chen_appendixC_alpha0.5" ou "chen_appendixC_alpha_alpha0.5", et alpha figure dans la
+    colonne 'alpha', dans le nom de la méthode ou seulement dans le nom du fichier
+    (approx_..._alpha0.5_...csv). On retient, dans cet ordre : la colonne 'alpha', la valeur
+    dans le nom de la méthode, la valeur dans le nom du fichier, sinon 0. La méthode devient
+    "chen_appendixC_alpha0.5" (ou "chen_appendixC" si alpha = 0), et la colonne 'alpha' est
+    remplie pour toutes les lignes de Chen et al.
+    """
+    if "alpha" not in df.columns:
+        df["alpha"] = np.nan
+    chen = df["method"].astype(str).str.startswith(CHEN_PREFIX)
+    if not chen.any():
+        return df
+    parts = df.loc[chen, "method"].map(split_method)
+    base = parts.str[0]
+    from_method = df.loc[chen, "method"].astype(str).map(
+        lambda m: float(v[-1]) if (v := _ALPHA_VALUE_RE.findall(m)) else np.nan)
+    from_file = df.loc[chen, "source_file"].map(
+        lambda f: float(v[-1]) if (v := _ALPHA_VALUE_RE.findall(str(f))) else np.nan)
+    alpha = df.loc[chen, "alpha"].astype(float)
+    alpha = alpha.fillna(from_method).fillna(from_file).fillna(0.0)
+    df.loc[chen, "alpha"] = alpha
+    df.loc[chen, "method"] = [method_name(b, a) for b, a in zip(base, alpha)]
+    return df
 
 
 def add_exact_reference(df):
