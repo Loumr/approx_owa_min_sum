@@ -12,12 +12,13 @@ et min_lorenz.py (exact Gurobi, min_lorenz, min_lorenz_v2).
   Quand les deux lignes ont une empreinte d'instance, rien n'est calculé si elles diffèrent.
 
 Fichiers lus (CSV écrits instance par instance) :
-    approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv       (ordered_opt.py)
+    approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv       (ordered_opt.py, version récursive)
+    approx_n{n}_delta{delta}_eps{eps}_{w_type}_loop.csv  (ordered_opt.py --loop, méthode chen_appendixC_loop)
     exact_n{n}_{w_type}.csv                              (min_lorenz.py --method exact)
     min_lorenz[_v2]_n{n}_eps{eps}_{w_type}.csv           (min_lorenz.py)
 
 Usage :
-    python export_results.py --results-dir ../results/assignment --out-dir ../results/excel
+    python export_results.py --results-dir ../results/assignment --out-dir ../results/assignment/excel
     python export_results.py --summary-per-config
 """
 
@@ -32,11 +33,13 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+# Le motif approx_* couvre aussi les fichiers *_loop.csv (version itérative)
 PATTERNS = ("approx_n*_delta*_eps*_*.csv", "exact_n*_*.csv", "min_lorenz*_n*_eps*_*.csv")
 CONFIG_KEYS = ["method", "w_type", "n", "delta", "eps"]
 INSTANCE_KEYS = CONFIG_KEYS + ["seed", "instance"]
 MATCH_KEYS = ["w_type", "n", "seed", "instance"]   # pour retrouver l'exact d'une instance
 EXACT_METHOD = "exact"
+LOOP_SUFFIX = "_loop"   # version itérative de ordered_opt.py (--loop)
 
 # Libellés lisibles (colonnes absentes ou entièrement vides ignorées)
 RAW_LABELS = {
@@ -100,6 +103,13 @@ def load_results(results_dir="../results/assignment", patterns=PATTERNS):
     for col in CONFIG_KEYS:
         if col not in df.columns:
             df[col] = np.nan
+    # Version itérative (--loop) : la méthode porte le suffixe _loop. Les fichiers *_loop.csv
+    # écrits avant l'ajout de ce suffixe dans la colonne 'method' sont corrigés ici, sinon ils
+    # seraient fusionnés avec la version récursive (et dédoublonnés avec elle).
+    method = df["method"].astype(str)
+    from_loop_file = df["source_file"].str.endswith(LOOP_SUFFIX + ".csv")
+    fix = from_loop_file & df["method"].notna() & ~method.str.endswith(LOOP_SUFFIX)
+    df.loc[fix, "method"] = method[fix] + LOOP_SUFFIX
     # Fichiers écrits par d'anciennes versions, sans colonne 'status' : ces versions n'avaient
     # pas de limite de temps et n'écrivaient une ligne qu'une fois l'instance terminée, donc
     # une ligne avec une valeur est une instance terminée.

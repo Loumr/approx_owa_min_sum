@@ -161,8 +161,75 @@ def explore(l, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, cand
 
 
 
+def explore_alpha(l, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, candidates, buffers, coefs, tmp, alpha, beta, beta_sums, buf_S, eps):
+    """
+    Recursive function to explore the possible values of t and find the optimal solution (from Chakrabarty and Swamy).
+    
+    :param l: Rank of the current element being chosen in t (must be greater than 0)
+    :param prev_fixed: Numpy array of size p containing the previous fixed elements (with last elements being 0)
+    :param p: Size of vector t (number of elements to choose)
+    :param eps: Epsilon value for the construction of the grid of possible values for t
+    :param n: Number of costs to be considered in the optimization problem
+    """
+    p = len(POS)
 
-def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, deadline=None):
+    if l < 1:
+        raise ValueError("l must be greater than 0")
+    
+    if l == p:
+        # Check if the time limit has been reached
+        if state["deadline"] is not None and time.monotonic() >= state["deadline"]:
+            raise TimeLimitReached
+    
+        # Solve the optimization problem with the modified costs
+        sol, _ = min_sum_func(buffers[p]) # buffers[p] contains the sum of costs on t
+        # Compute the OWA value for the solution
+        value = owa(cost_matrix[np.arange(len(sol)), sol], w)
+        state["num_t"] += 1
+
+        if state["best_value"] is None or value < state["best_value"]:
+            state["best_sol"] = sol.copy()
+            state["best_value"] = value
+
+        return 
+    
+    mu_l = alpha * buf_S[l-1] / beta_sums[l] if beta_sums[l] > 0 else 0.0
+    if mu_l > 0:
+        max_j = int(np.floor(np.log(prev_fixed[0] / mu_l) / np.log(1 + eps) + 1e-9))
+        max_j = min(max_j, len(candidates) - 2)
+    else:
+        max_j = len(candidates) - 2
+    v = min(prev_fixed[l-1], mu_l)
+    prev_fixed[l:] = v
+    np.subtract(cost_matrix, v, out=tmp)
+    np.maximum(tmp, 0.0, out=tmp)
+    tmp *= w[POS[l]]
+    np.add(buffers[l], tmp, out=buffers[p])
+    explore_alpha(p, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, candidates, buffers, coefs, tmp, alpha, beta, beta_sums, buf_S, eps)
+    
+    for j in range(min_j, max_j + 1):
+        c = candidates[j]
+        '''
+        # if candidate == 0.0, skip the remaining recursive calls, as they will all be 0.0 and will not yield a better solution
+        if c == 0.0:
+            prev_fixed[l:] = 0.0 # Set the remaining elements to 0
+            np.multiply(cost_matrix, w[POS[l]], out=tmp)
+            np.add(buffers[l], tmp, out=buffers[p])
+            explore_alpha(p, prev_fixed, POS, w, cost_matrix, min_sum_func, state, j, candidates, buffers, coefs, tmp, alpha, beta, beta_sums, buf_S, eps)
+            continue
+        '''
+        prev_fixed[l] = c
+        np.subtract(cost_matrix, c, out=tmp)
+        np.maximum(tmp, 0.0, out=tmp)
+        tmp *= coefs[l] # multiply matrix costs_t by (w_l - w_next(l))
+        np.add(buffers[l], tmp, out=buffers[l+1])  # add costs_t to the sum already computed in buffers[l] and put it in buffers[l+1]
+        buf_S[l] = buf_S[l-1] + beta[l] * c
+        explore_alpha(l+1, prev_fixed, POS, w, cost_matrix, min_sum_func, state, j, candidates, buffers, coefs, tmp, alpha, beta, beta_sums, buf_S, eps)
+
+
+
+
+def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, deadline=None, alpha=0.0):
     """
     Approximate ordered optimization problem solver based on the algorithm from Chakrabarty and Swamy (2019).
     
@@ -197,6 +264,11 @@ def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, dead
     wp = np.asarray(w, dtype=float)[POS] # keep only weights at k in POS
     coefs = np.append(wp[:-1] - wp[1:], wp[-1])
     buffers = np.zeros((p+1,) + cost_matrix.shape)  # buffers[0] = 0; keeps track of (w_l - w_next(l))(v-t_l) for each value of t and each value v in cost matrix
+    if alpha != 0.0:
+        beta = coefs * (np.asarray(POS) + 1)
+        beta_sums = np.cumsum(beta)
+        buf_S = np.zeros(p+1)  # keeps track of S(t) values
+
     base_cost = np.append(1 / (1 + eps) ** np.arange(max_j + 1), 0.0) # possible base values of threshold vector (to be multiplied by rho)
     tmp = np.empty(cost_matrix.shape)
 
@@ -214,8 +286,11 @@ def approx_ordered(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum, dead
             np.subtract(cost_matrix, rho, out=tmp)
             np.maximum(tmp, 0.0, out=tmp)
             np.multiply(tmp, coefs[0], out=buffers[1])
-
-            explore(1, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, candidates, buffers, coefs, tmp)
+            if alpha != 0.0:
+                buf_S[0] = beta[0] * rho
+                explore_alpha(1, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, candidates, buffers, coefs, tmp, alpha, beta, beta_sums, buf_S, eps)
+            else:
+                explore(1, prev_fixed, POS, w, cost_matrix, min_sum_func, state, min_j, candidates, buffers, coefs, tmp)
 
     except TimeLimitReached:
         status = "timeout"
@@ -302,13 +377,16 @@ def approx_ordered_loop(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum,
 # Experiments: one row per instance, appended to the CSV as soon as it is done
 # ---------------------------------------------------------------------------
  
-def results_path(results_dir, n, delta, eps, w_type, loop=False):
+def results_path(results_dir, n, delta, eps, w_type, loop=False, alpha=0.0):
     """One file per configuration, so runs with different parameters never overwrite each other."""
     if loop:
         return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}_loop.csv")
-    return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv")
+    else:
+        if alpha == 0.0:
+            return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv")
+        else:
+            return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_alpha{alpha}_{w_type}.csv")
     
-
 
 def n_available_cores():
     """Cores actually allocated (cpuset OAR), not all cores of the node."""
@@ -318,7 +396,7 @@ def n_available_cores():
         return os.cpu_count()
 
 
-def solve_one(instance, delta, eps, deadline, loop=False):
+def solve_one(instance, delta, eps, deadline, loop=False, alpha=0.0):
     """Run the algorithm on one instance, return a dict with the results (or None if the time budget is already reached)."""
     if deadline is not None and time.monotonic() >= deadline:
         return None  # budget reached before starting: skip this instance
@@ -330,6 +408,7 @@ def solve_one(instance, delta, eps, deadline, loop=False):
             "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
             "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
         }
+        
     else:
         t0 = time.perf_counter()
         best_sol, best_value, POS, num_t, status = approx_ordered_loop(
@@ -343,8 +422,8 @@ def solve_one(instance, delta, eps, deadline, loop=False):
  
 def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                        results_dir="../results/assignment", save_solutions=True,
-                       n_workers=None, time_limit=None, rerun="unfinished", loop=False):
-    path = results_path(results_dir, n, delta, eps, w_type, loop)
+                       n_workers=None, time_limit=None, rerun="unfinished", loop=False, alpha=0.0):
+    path = results_path(results_dir, n, delta, eps, w_type, loop, alpha)
     done = set()
     if save:
         os.makedirs(results_dir, exist_ok=True)
@@ -358,9 +437,11 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
           f"budget {time_limit if time_limit else 'unlimited'} s", flush=True)
 
     method = "chen_appendixC_loop" if loop else "chen_appendixC"
+    if alpha != 0.0:
+        method += f"_alpha{alpha:g}"
     rows, not_started = [], 0
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
-        futures = [ex.submit(solve_one, inst, delta, eps, deadline, loop) for inst in todo]
+        futures = [ex.submit(solve_one, inst, delta, eps, deadline, loop, alpha) for inst in todo]
         for fut in as_completed(futures):
             res = fut.result()
             if res is None:
@@ -376,6 +457,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                 "num_t": res["num_t"],
                 "p": res["p"],
                 "time_s": res["time_s"],
+                "alpha": alpha,
                 "time_limit_total_s": time_limit,
                 "n_workers": n_workers,
                 "guarantee": (1 + delta) * (1 + 2 * eps),
@@ -413,8 +495,12 @@ if __name__ == "__main__":
     parser.add_argument("--output", default=None)
     parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished")
     parser.add_argument("--loop", action="store_true", help="use the iterative version (combinations_with_replacement) instead of the recursive one")
+    parser.add_argument("--alpha", type=float, default=0.0)
 
     args = parser.parse_args()
+
+    if args.loop and args.alpha != 0.0:
+        parser.error("--alpha is not implemented for the iterative version (--loop)")
 
     results_dir = os.path.dirname(args.output) if args.output else "../results/assignment"
     time_limit = args.time_limit if args.time_limit > 0 else None
@@ -422,7 +508,7 @@ if __name__ == "__main__":
     dfs = [test_approx_assign(n=n, delta=args.delta, eps=args.eps, w_type=args.w_type,
                               nb_instances=args.nb_instances, save=True, seed=args.seed,
                               results_dir=results_dir, n_workers=args.workers,
-                              time_limit=time_limit, rerun=args.rerun, loop=args.loop)
+                              time_limit=time_limit, rerun=args.rerun, loop=args.loop, alpha=args.alpha)
            for n in args.n]
 
     if args.output:

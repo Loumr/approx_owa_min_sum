@@ -4,4 +4,4 @@ OAR.*.stdout
 *.xlsx
 *.csv
 __pycache__/
-params*
+params*.txt
