@@ -48,7 +48,7 @@ EOF
 N=$1
 DELTA=${2:-0.1}
 EPS=${3:-0.1}
-ALPHA=${4:0.0}
+ALPHA=${4:-0.0}
 W_TYPE="linear_weights"
 NB_INSTANCES=30
 TIME_LIMIT=55000          # budget total (s, temps réel) pour les NB_INSTANCES instances
