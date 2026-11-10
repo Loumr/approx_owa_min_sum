@@ -48,6 +48,7 @@ EOF
 N=$1
 DELTA=${2:-0.1}
 EPS=${3:-0.1}
+ALPHA=${4:0.0}
 W_TYPE="linear_weights"
 NB_INSTANCES=30
 TIME_LIMIT=55000          # budget total (s, temps réel) pour les NB_INSTANCES instances
@@ -57,7 +58,7 @@ TIME_LIMIT=55000          # budget total (s, temps réel) pour les NB_INSTANCES 
 PROJECT_DIR=$HOME/projet_owa_min_sum
 SCRIPT=$PROJECT_DIR/approx_owa_min_sum/ordered_opt.py
 RESULTS_DIR=$PROJECT_DIR/results/assignment
-OUTPUT=$RESULTS_DIR/approx_n${N}_delta${DELTA}_eps${EPS}_${W_TYPE}.parquet
+OUTPUT=$RESULTS_DIR/approx_n${N}_delta${DELTA}_eps${EPS}_alpha${ALPHA}_${W_TYPE}.parquet
 
 if [ $ARRAY_MODE -eq 1 ]; then
     echo "[submit_array] n=${N} delta=${DELTA} eps=${EPS} w_type=${W_TYPE} (job ${OAR_ARRAY_INDEX}) -> ${OUTPUT}"
@@ -96,6 +97,7 @@ python3 "$SCRIPT" \
     --n "$N" \
     --delta "$DELTA" \
     --eps "$EPS" \
+    --alpha "$ALPHA" \
     --w-type "$W_TYPE" \
     --nb-instances "$NB_INSTANCES" \
     --time-limit "$TIME_LIMIT" \

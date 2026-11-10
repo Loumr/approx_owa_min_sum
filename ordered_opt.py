@@ -403,7 +403,7 @@ def solve_one(instance, delta, eps, deadline, loop=False, alpha=0.0):
     if not loop:
         t0 = time.perf_counter()
         best_sol, best_value, POS, num_t, status = approx_ordered(
-            instance["cost_matrix"], instance["W"], delta=delta, eps=eps, deadline=deadline)
+            instance["cost_matrix"], instance["W"], delta=delta, eps=eps, deadline=deadline, alpha=alpha)
         return {
             "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
             "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
@@ -435,8 +435,11 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
     deadline = time.monotonic() + time_limit if time_limit else None
     print(f"n={n}: {len(todo)} instance(s) to solve on {n_workers} worker(s), "
           f"budget {time_limit if time_limit else 'unlimited'} s", flush=True)
-
-    method = "chen_appendixC_loop" if loop else "chen_appendixC"
+    
+    if loop:
+        method = "chen_appendixC_loop"
+    else:
+        method = "chen_appendixC" if alpha==0.0 else "chen_appendixC_alpha"
     if alpha != 0.0:
         method += f"_alpha{alpha:g}"
     rows, not_started = [], 0
