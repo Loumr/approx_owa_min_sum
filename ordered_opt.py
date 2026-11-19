@@ -10,10 +10,17 @@ import scipy.optimize as opt
 import pandas as pd
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from instance_generator import generate_instances
+from instance_generator import generate_instances, generate_instances_double_uniform, generate_instances_heterogene
 from resume import RERUN_MODES, append_row, prepare_resume
 
 from itertools import combinations_with_replacement
+
+
+COEF = 1
+
+FACTORS = [1, 2, 4]
+PROP = [0.8, 0.15, 0.05]
+
 
 
 class TimeLimitReached(Exception):
@@ -377,15 +384,33 @@ def approx_ordered_loop(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum,
 # Experiments: one row per instance, appended to the CSV as soon as it is done
 # ---------------------------------------------------------------------------
  
-def results_path(results_dir, n, delta, eps, w_type, loop=False, alpha=0.0):
+def _fmt_list(values):
+    """[1, 2, 4] -> '1-2-4' ; [0.8, 0.15, 0.05] -> '0.8-0.15-0.05'."""
+    return "-".join(f"{v:g}" for v in values)
+
+
+def instance_tag(gen_inst, factors=FACTORS, prop=PROP, coef=COEF):
+    """Sub-folder name identifying the instance family AND its parameters."""
+    if gen_inst == "uniform":
+        return "uniform"
+    if gen_inst == "double_uniform":
+        return f"double_uniform_coef{coef:g}"
+    if gen_inst == "heterogene":
+        return f"heterogene_f{_fmt_list(factors)}_p{_fmt_list(prop)}"
+    raise ValueError(f"unknown gen_inst: {gen_inst}")
+
+
+def results_path(results_dir, n, delta, eps, w_type, loop=False, alpha=0.0, tag="uniform"):
     """One file per configuration, so runs with different parameters never overwrite each other."""
+    folder = os.path.join(results_dir, tag)
+    os.makedirs(folder, exist_ok=True)
+    name = f"approx_n{n}_delta{delta}_eps{eps}"
+    if not loop and alpha != 0.0:
+        name += f"_alpha{alpha}"
+    name += f"_{w_type}"
     if loop:
-        return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}_loop.csv")
-    else:
-        if alpha == 0.0:
-            return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_{w_type}.csv")
-        else:
-            return os.path.join(results_dir, f"approx_n{n}_delta{delta}_eps{eps}_alpha{alpha}_{w_type}.csv")
+        name += "_loop"
+    return os.path.join(folder, name + ".csv")
     
 
 def n_available_cores():
@@ -400,6 +425,20 @@ def solve_one(instance, delta, eps, deadline, loop=False, alpha=0.0):
     """Run the algorithm on one instance, return a dict with the results (or None if the time budget is already reached)."""
     if deadline is not None and time.monotonic() >= deadline:
         return None  # budget reached before starting: skip this instance
+    
+    # Min-sum baseline: Hungarian algorithm on the raw costs (no OWA)
+    C, W = instance["cost_matrix"], instance["W"]
+    t_ms = time.perf_counter()
+    ms_sol, ms_value = assign_min_sum(C)
+    ms_time = time.perf_counter() - t_ms
+    min_sum = {
+        "min_sum_value": float(ms_value),
+        "min_sum_owa": owa(C[np.arange(len(ms_sol)), ms_sol], W),
+        "owa_lower_bound": float(ms_value) * float(np.sum(W)) / len(W),
+        "min_sum_time_s": ms_time,
+        "min_sum_sol": ms_sol,
+    }
+
     if not loop:
         t0 = time.perf_counter()
         best_sol, best_value, POS, num_t, status = approx_ordered(
@@ -422,14 +461,22 @@ def solve_one(instance, delta, eps, deadline, loop=False, alpha=0.0):
  
 def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                        results_dir="../results/assignment", save_solutions=True,
-                       n_workers=None, time_limit=None, rerun="unfinished", loop=False, alpha=0.0):
-    path = results_path(results_dir, n, delta, eps, w_type, loop, alpha)
+                       n_workers=None, time_limit=None, rerun="unfinished", loop=False, alpha=0.0, gen_inst="uniform",
+                       factors=FACTORS, prop=PROP, coef=COEF):
+    tag = instance_tag(gen_inst, factors, prop, coef)  # also validates gen_inst
+    path = results_path(results_dir, n, delta, eps, w_type, loop, alpha, tag)
     done = set()
     if save:
-        os.makedirs(results_dir, exist_ok=True)
         done = prepare_resume(path, rerun)
 
-    instances = generate_instances(n, nb_instances, w_type, cost_seed=seed)
+    if gen_inst == "uniform":
+        instances = generate_instances(n, nb_instances, w_type, cost_seed=seed)
+    elif gen_inst == "double_uniform":
+        prob = min(coef / n, 1.0)
+        instances = generate_instances_double_uniform(n, nb_instances, w_type, prob, cost_seed=seed)
+    else:  
+        instances = generate_instances_heterogene(n, nb_instances, w_type, factors, prop, cost_seed=seed)
+    
     todo = [inst for inst in instances if str(inst["instance"]) not in done]
     n_workers = n_workers or n_available_cores()
     deadline = time.monotonic() + time_limit if time_limit else None
@@ -461,6 +508,11 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                 "p": res["p"],
                 "time_s": res["time_s"],
                 "alpha": alpha,
+                "gen_inst": gen_inst,
+                "instance_tag": tag,
+                "factors": _fmt_list(factors) if gen_inst == "heterogene" else "",
+                "prop": _fmt_list(prop) if gen_inst == "heterogene" else "",
+                "coef": coef if gen_inst == "double_uniform" else ""
                 "time_limit_total_s": time_limit,
                 "n_workers": n_workers,
                 "guarantee": (1 + delta) * (1 + 2 * eps),
@@ -468,6 +520,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
             if save_solutions:
                 row["assignment"] = (" ".join(map(str, res["best_sol"]))
                                      if res["best_sol"] is not None else "")
+                row["min_sum_assignment"] = " ".join(map(str, res["min_sum_sol"]))
             rows.append(row)
 
             if save:
@@ -499,11 +552,25 @@ if __name__ == "__main__":
     parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished")
     parser.add_argument("--loop", action="store_true", help="use the iterative version (combinations_with_replacement) instead of the recursive one")
     parser.add_argument("--alpha", type=float, default=0.0)
+    parser.add_argument("--gen-inst", default="uniform", choices=["uniform", "double_uniform", "heterogene"],
+                        help="method to generate cost matrices")
+    parser.add_argument("--factors", type=float, nargs="+", default=FACTORS,
+                        help="heterogene: multipliers, e.g. --factors 1 2 4")
+    parser.add_argument("--prop", type=float, nargs="+", default=PROP,
+                        help="heterogene: probability of each multiplier, e.g. --prop 0.8 0.15 0.05")
+    parser.add_argument("--coef", type=float, default=COEF,
+                        help="double_uniform: prob = coef / n of drawing a cheap cost")
 
     args = parser.parse_args()
 
     if args.loop and args.alpha != 0.0:
         parser.error("--alpha is not implemented for the iterative version (--loop)")
+
+    if args.gen_inst == "heterogene":
+        if len(args.factors) != len(args.prop):
+            parser.error("--factors and --prop must have the same length")
+        if not np.isclose(sum(args.prop), 1.0):
+            parser.error(f"--prop must sum to 1 (got {sum(args.prop)})")
 
     results_dir = os.path.dirname(args.output) if args.output else "../results/assignment"
     time_limit = args.time_limit if args.time_limit > 0 else None
@@ -511,7 +578,8 @@ if __name__ == "__main__":
     dfs = [test_approx_assign(n=n, delta=args.delta, eps=args.eps, w_type=args.w_type,
                               nb_instances=args.nb_instances, save=True, seed=args.seed,
                               results_dir=results_dir, n_workers=args.workers,
-                              time_limit=time_limit, rerun=args.rerun, loop=args.loop, alpha=args.alpha)
+                              time_limit=time_limit, rerun=args.rerun, loop=args.loop, alpha=args.alpha, 
+                              gen_inst=args.gen_inst, factors=args.factors, prop=args.prop, coef=args.coef)
            for n in args.n]
 
     if args.output:

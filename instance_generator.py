@@ -26,6 +26,44 @@ def generate_cost_matrices(n, nb_instances, seed=0):
     return [rng.integers(1, 10**4, (n, n), dtype=int).astype(float) for _ in range(nb_instances)]
 
 
+def generate_cost_matrices_double_uniform(n, nb_instances, prob, seed=0):
+    rng = np.random.default_rng(seed)
+    instances = []
+
+    for _ in range(nb_instances):
+        A = rng.integers(1, 1001, (n, n), dtype=int).astype(float)
+        B = rng.integers(5000, 10000, (n, n), dtype=int).astype(float)
+
+        mask = rng.choice([1, 0], (n, n), p=[prob, 1-prob])
+
+        inst = A * mask + B * (1 - mask)
+
+        instances.append(inst)
+
+    return instances
+
+
+def generate_cost_matrices_heterogene(n, nb_instances, factors, prop=[0.8, 0.15, 0.05], seed=0):
+    if len(factors) != len(prop):
+        raise ValueError("List of multipliers not the same size as the list of probabilities")
+    
+    rng = np.random.default_rng(seed)
+    factors = np.asarray(factors, dtype=float)
+    instances = []
+
+    for _ in range(nb_instances):
+        mask = rng.choice(len(prop), size=(n, n), p=prop)
+        A = rng.integers(1, 1001, (n, n), dtype=int).astype(float)
+
+        instances.append(A * factors[mask])
+
+    return instances
+
+
+
+
+
+
 # ----------------------------------------------------------------------
 # Poids
 # ----------------------------------------------------------------------
@@ -73,6 +111,32 @@ def generate_instances(n, nb_instances, w_type, cost_seed=0):
         {"instance": i, "cost_matrix": ..., "W": ...}
     """
     cost_matrices = generate_cost_matrices(n, nb_instances, seed=cost_seed)
+    instances = []
+    for i in range(nb_instances):
+        W = get_weights(w_type, n, i)
+        instances.append({
+            "instance": i,
+            "cost_matrix": cost_matrices[i],
+            "W": W,
+        })
+    return instances
+
+
+def generate_instances_double_uniform(n, nb_instances, w_type, prob, cost_seed=0):
+    cost_matrices = generate_cost_matrices_double_uniform(n, nb_instances, prob, seed=cost_seed)
+    instances = []
+    for i in range(nb_instances):
+        W = get_weights(w_type, n, i)
+        instances.append({
+            "instance": i,
+            "cost_matrix": cost_matrices[i],
+            "W": W,
+        })
+    return instances
+
+
+def generate_instances_heterogene(n, nb_instances, w_type, factors, prop, cost_seed=0):
+    cost_matrices = generate_cost_matrices_heterogene(n, nb_instances, factors, prop, seed=cost_seed)
     instances = []
     for i in range(nb_instances):
         W = get_weights(w_type, n, i)
