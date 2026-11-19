@@ -512,7 +512,7 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
                 "instance_tag": tag,
                 "factors": _fmt_list(factors) if gen_inst == "heterogene" else "",
                 "prop": _fmt_list(prop) if gen_inst == "heterogene" else "",
-                "coef": coef if gen_inst == "double_uniform" else ""
+                "coef": coef if gen_inst == "double_uniform" else "",
                 "time_limit_total_s": time_limit,
                 "n_workers": n_workers,
                 "guarantee": (1 + delta) * (1 + 2 * eps),
