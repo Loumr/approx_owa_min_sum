@@ -10,16 +10,9 @@ import scipy.optimize as opt
 import pandas as pd
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from instance_generator import generate_instances, generate_instances_double_uniform, generate_instances_heterogene
-from resume import RERUN_MODES, append_row, prepare_resume
+from instance_generator import (COEF, FACTORS, GEN_INST, PROP, _fmt_list, generate_instances_by_type, instance_tag)
 
 from itertools import combinations_with_replacement
-
-
-COEF = 1
-
-FACTORS = [1, 2, 4]
-PROP = [0.8, 0.15, 0.05]
 
 
 
@@ -384,21 +377,6 @@ def approx_ordered_loop(cost_matrix, w, delta, eps, min_sum_func=assign_min_sum,
 # Experiments: one row per instance, appended to the CSV as soon as it is done
 # ---------------------------------------------------------------------------
  
-def _fmt_list(values):
-    """[1, 2, 4] -> '1-2-4' ; [0.8, 0.15, 0.05] -> '0.8-0.15-0.05'."""
-    return "-".join(f"{v:g}" for v in values)
-
-
-def instance_tag(gen_inst, factors=FACTORS, prop=PROP, coef=COEF):
-    """Sub-folder name identifying the instance family AND its parameters."""
-    if gen_inst == "uniform":
-        return "uniform"
-    if gen_inst == "double_uniform":
-        return f"double_uniform_coef{coef:g}"
-    if gen_inst == "heterogene":
-        return f"heterogene_f{_fmt_list(factors)}_p{_fmt_list(prop)}"
-    raise ValueError(f"unknown gen_inst: {gen_inst}")
-
 
 def results_path(results_dir, n, delta, eps, w_type, loop=False, alpha=0.0, tag="uniform"):
     """One file per configuration, so runs with different parameters never overwrite each other."""
@@ -469,14 +447,8 @@ def test_approx_assign(n, delta, eps, w_type, nb_instances, save=True, seed=0,
     if save:
         done = prepare_resume(path, rerun)
 
-    if gen_inst == "uniform":
-        instances = generate_instances(n, nb_instances, w_type, cost_seed=seed)
-    elif gen_inst == "double_uniform":
-        prob = min(coef / n, 1.0)
-        instances = generate_instances_double_uniform(n, nb_instances, w_type, prob, cost_seed=seed)
-    else:  
-        instances = generate_instances_heterogene(n, nb_instances, w_type, factors, prop, cost_seed=seed)
-    
+    instances = generate_instances_by_type(gen_inst, n, nb_instances, w_type, seed, factors, prop, coef)
+        
     todo = [inst for inst in instances if str(inst["instance"]) not in done]
     n_workers = n_workers or n_available_cores()
     deadline = time.monotonic() + time_limit if time_limit else None
@@ -552,7 +524,7 @@ if __name__ == "__main__":
     parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished")
     parser.add_argument("--loop", action="store_true", help="use the iterative version (combinations_with_replacement) instead of the recursive one")
     parser.add_argument("--alpha", type=float, default=0.0)
-    parser.add_argument("--gen-inst", default="uniform", choices=["uniform", "double_uniform", "heterogene"],
+    parser.add_argument("--gen-inst", default="uniform", choices=GEN_INST,
                         help="method to generate cost matrices")
     parser.add_argument("--factors", type=float, nargs="+", default=FACTORS,
                         help="heterogene: multipliers, e.g. --factors 1 2 4")

@@ -15,6 +15,13 @@ Regenere les instances exactement comme dans le pipeline original :
 import numpy as np
 
 
+# Default parameters of the cost generators
+FACTORS = [1, 2, 4]
+PROP = [0.8, 0.15, 0.05]
+COEF = 1
+GEN_INST = ("uniform", "double_uniform", "heterogene")
+
+
 # ----------------------------------------------------------------------
 # Couts
 # ----------------------------------------------------------------------
@@ -146,3 +153,32 @@ def generate_instances_heterogene(n, nb_instances, w_type, factors, prop, cost_s
             "W": W,
         })
     return instances
+
+
+def _fmt_list(values):
+    """[1, 2, 4] -> '1-2-4' ; [0.8, 0.15, 0.05] -> '0.8-0.15-0.05'."""
+    return "-".join(f"{v:g}" for v in values)
+
+
+def instance_tag(gen_inst, factors=FACTORS, prop=PROP, coef=COEF):
+    """Sub-folder name identifying the instance family AND its parameters."""
+    if gen_inst == "uniform":
+        return "uniform"
+    if gen_inst == "double_uniform":
+        return f"double_uniform_coef{coef:g}"
+    if gen_inst == "heterogene":
+        return f"heterogene_f{_fmt_list(factors)}_p{_fmt_list(prop)}"
+    raise ValueError(f"unknown gen_inst: {gen_inst}")
+
+
+def generate_instances_by_type(gen_inst, n, nb_instances, w_type, seed=0,
+                               factors=FACTORS, prop=PROP, coef=COEF):
+    """Same instances whatever the script that calls it."""
+    if gen_inst == "uniform":
+        return generate_instances(n, nb_instances, w_type, cost_seed=seed)
+    if gen_inst == "double_uniform":
+        prob = min(coef / n, 1.0)
+        return generate_instances_double_uniform(n, nb_instances, w_type, prob, cost_seed=seed)
+    if gen_inst == "heterogene":
+        return generate_instances_heterogene(n, nb_instances, w_type, factors, prop, cost_seed=seed)
+    raise ValueError(f"unknown gen_inst: {gen_inst}")

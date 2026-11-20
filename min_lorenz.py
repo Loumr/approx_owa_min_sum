@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
 
-from instance_generator import generate_instances
+from instance_generator import (COEF, FACTORS, GEN_INST, PROP, _fmt_list, generate_instances_by_type, instance_tag)
 from instance_store import instance_fingerprint, save_instances
 from resume import RERUN_MODES, append_row, prepare_resume
 
@@ -174,10 +174,12 @@ def exact_gurobi(cost_matrix, W, time_limit=None, threads=1, mem_limit_gb=None, 
 # Expérience
 # ---------------------------------------------------------------------------
 
-def results_path(results_dir, method, n, eps, w_type):
+def results_path(results_dir, method, n, eps, w_type, tag="uniform"):
+    folder = os.path.join(results_dir, tag)
+    os.makedirs(folder, exist_ok=True)
     if method == "exact":
-        return os.path.join(results_dir, f"exact_n{n}_{w_type}.csv")
-    return os.path.join(results_dir, f"{method}_n{n}_eps{eps}_{w_type}.csv")
+        return os.path.join(folder, f"exact_n{n}_{w_type}.csv")
+    return os.path.join(folder, f"{method}_n{n}_eps{eps}_{w_type}.csv")
 
 
 def n_available_cores():
@@ -226,18 +228,22 @@ def solve_one(instance, method, eps, deadline, gurobi_threads, gurobi_mem_gb=Non
 def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers=None,
         results_dir="../results/assignment", instances_dir="../results/instances",
         gurobi_threads=1, gurobi_mem_gb=None, gurobi_legacy=False, save_solutions=True,
-        rerun="unfinished"):
+        rerun="unfinished", gen_inst="uniform", factors=FACTORS, prop=PROP, coef=COEF):
+    
     if method not in METHODS:
         raise ValueError(f"method doit être parmi {METHODS}, reçu : {method}")
     if method == "exact":
         eps = np.nan  # sans objet pour l'exact
 
-    path = results_path(results_dir, method, n, eps, w_type)
-    os.makedirs(results_dir, exist_ok=True)
+    tag = instance_tag(gen_inst, factors, prop, coef)
+    path = results_path(results_dir, method, n, eps, w_type, tag)
     done = prepare_resume(path, rerun)
 
-    instances = generate_instances(n, nb_instances, w_type, cost_seed=seed)
-    save_instances(instances, n, w_type, seed, instances_dir)
+    instances = generate_instances_by_type(gen_inst, n, nb_instances, w_type, seed,
+                                           factors, prop, coef)
+    inst_dir = os.path.join(instances_dir, tag)
+    os.makedirs(inst_dir, exist_ok=True)
+    save_instances(instances, n, w_type, seed, inst_dir)
 
     todo = [inst for inst in instances if str(inst["instance"]) not in done]
     n_workers = n_workers or n_available_cores()
@@ -260,6 +266,10 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
                 "status": res["status"], "best_value": res["best_value"],
                 "nb_sols": res["nb_sols"], "mip_gap": res["mip_gap"], "solver_obj": res["solver_obj"],
                 "lower_bound": res["lower_bound"],
+                "gen_inst": gen_inst, "instance_tag": tag,
+                "factors": _fmt_list(factors) if gen_inst == "heterogene" else "",
+                "prop": _fmt_list(prop) if gen_inst == "heterogene" else "",
+                "coef": coef if gen_inst == "double_uniform" else "",
                 "time_s": res["time_s"], "time_limit_total_s": time_limit, "n_workers": n_workers,
             }
             if save_solutions:
@@ -294,9 +304,23 @@ if __name__ == "__main__":
     parser.add_argument("--rerun", choices=RERUN_MODES, default="unfinished",
                         help="unfinished : relance les instances absentes ou non terminées ; "
                              "all : tout relancer ; none : seulement les absentes")
+    parser.add_argument("--gen-inst", choices=GEN_INST, default="uniform",
+                        help="méthode de génération des coûts")
+    parser.add_argument("--factors", type=float, nargs="+", default=FACTORS,
+                        help="heterogene : multiplicateurs, ex. --factors 1 2 4")
+    parser.add_argument("--prop", type=float, nargs="+", default=PROP,
+                        help="heterogene : probabilité de chaque multiplicateur, ex. --prop 0.8 0.15 0.05")
+    parser.add_argument("--coef", type=float, default=COEF,
+                        help="double_uniform : prob = coef / n de tirer un coût faible")
     parser.add_argument("--results-dir", default="../results/assignment")
     parser.add_argument("--instances-dir", default="../results/instances")
     args = parser.parse_args()
+
+    if args.gen_inst == "heterogene":
+        if len(args.factors) != len(args.prop):
+            parser.error("--factors et --prop doivent avoir la même longueur")
+        if not np.isclose(sum(args.prop), 1.0):
+            parser.error(f"--prop doit sommer à 1 (reçu {sum(args.prop)})")
 
     for n in args.n:
         run(args.method, n, args.eps, args.w_type, args.nb_instances, seed=args.seed,
@@ -304,4 +328,4 @@ if __name__ == "__main__":
             n_workers=args.workers, results_dir=args.results_dir,
             instances_dir=args.instances_dir, gurobi_threads=args.gurobi_threads,
             gurobi_mem_gb=args.gurobi_mem_gb, gurobi_legacy=args.gurobi_legacy_params,
-            rerun=args.rerun)
+            rerun=args.rerun, gen_inst=args.gen_inst, factors=args.factors, prop=args.prop, coef=args.coef)
