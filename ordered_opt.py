@@ -14,6 +14,7 @@ from instance_generator import (COEF, FACTORS, GEN_INST, PROP, _fmt_list, genera
 
 from itertools import combinations_with_replacement
 
+from resume import RERUN_MODES, append_row, prepare_resume
 
 
 class TimeLimitReached(Exception):
@@ -422,18 +423,20 @@ def solve_one(instance, delta, eps, deadline, loop=False, alpha=0.0):
         best_sol, best_value, POS, num_t, status = approx_ordered(
             instance["cost_matrix"], instance["W"], delta=delta, eps=eps, deadline=deadline, alpha=alpha)
         return {
-            "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
-            "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
-        }
+    "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
+    "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
+    **min_sum,
+}
         
     else:
         t0 = time.perf_counter()
         best_sol, best_value, POS, num_t, status = approx_ordered_loop(
             instance["cost_matrix"], instance["W"], delta=delta, eps=eps, deadline=deadline)
         return {
-            "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
-            "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
-        }
+    "instance": instance["instance"], "best_sol": best_sol, "best_value": best_value,
+    "p": len(POS), "num_t": num_t, "status": status, "time_s": time.perf_counter() - t0,
+    **min_sum,
+}
  
 
  

@@ -8,12 +8,14 @@ Méthodes (--method) :
     exact          MIP Gurobi (formulation duale de l'OWA)
     min_lorenz     seuils t, coûts max(c, t)
     min_lorenz_v2  seuils t, coûts max(c - t, 0), arrêt anticipé
+    min_sum        affectation min-somme (hongrois) sur les coûts bruts, évaluée en OWA
 
 --eps > 0 arrondit géométriquement les coûts ((1+eps)^floor(log_{1+eps} c)) avant de lancer
 min_lorenz ; la valeur rapportée est toujours l'OWA de la solution sur les VRAIS coûts.
 
 Sorties (dans --results-dir), une ligne par instance, écrite dès qu'elle est terminée :
     exact_n{n}_{w_type}.csv
+    min_sum_n{n}_{w_type}.csv
     {method}_n{n}_eps{eps}_{w_type}.csv
 Instances sauvegardées dans --instances-dir (voir instance_store.py).
 """
@@ -36,7 +38,8 @@ from instance_generator import (COEF, FACTORS, GEN_INST, PROP, _fmt_list, genera
 from instance_store import instance_fingerprint, save_instances
 from resume import RERUN_MODES, append_row, prepare_resume
 
-METHODS = ("exact", "min_lorenz", "min_lorenz_v2")
+METHODS = ("exact", "min_lorenz", "min_lorenz_v2", "min_sum")
+NO_EPS_METHODS = ("exact", "min_sum")   # eps sans objet
 
 
 class TimeLimitReached(Exception):
@@ -177,8 +180,8 @@ def exact_gurobi(cost_matrix, W, time_limit=None, threads=1, mem_limit_gb=None, 
 def results_path(results_dir, method, n, eps, w_type, tag="uniform"):
     folder = os.path.join(results_dir, tag)
     os.makedirs(folder, exist_ok=True)
-    if method == "exact":
-        return os.path.join(folder, f"exact_n{n}_{w_type}.csv")
+    if method in NO_EPS_METHODS:
+        return os.path.join(folder, f"{method}_n{n}_{w_type}.csv")
     return os.path.join(folder, f"{method}_n{n}_eps{eps}_{w_type}.csv")
 
 
@@ -207,6 +210,11 @@ def solve_one(instance, method, eps, deadline, gurobi_threads, gurobi_mem_gb=Non
         assign, status = res["assign"], res["status"]
         out.update(mip_gap=res["mip_gap"], solver_obj=res["solver_obj"],
                    lower_bound=res["lower_bound"])
+    elif method == "min_sum":
+        # Hongrois sur les coûts bruts ; la valeur rapportée est l'OWA de cette affectation
+        _, assign = linear_sum_assignment(C)
+        status = "completed"
+        out["min_sum_value"] = float(C[rows, assign].sum())
     else:
         variant = "v1" if method == "min_lorenz" else "v2"
         work = round_costs(C, eps) if eps > 0 else C
@@ -232,8 +240,8 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
     
     if method not in METHODS:
         raise ValueError(f"method doit être parmi {METHODS}, reçu : {method}")
-    if method == "exact":
-        eps = np.nan  # sans objet pour l'exact
+    if method in NO_EPS_METHODS:
+        eps = np.nan  # sans objet pour l'exact et le min-somme
 
     tag = instance_tag(gen_inst, factors, prop, coef)
     path = results_path(results_dir, method, n, eps, w_type, tag)
@@ -266,6 +274,7 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
                 "status": res["status"], "best_value": res["best_value"],
                 "nb_sols": res["nb_sols"], "mip_gap": res["mip_gap"], "solver_obj": res["solver_obj"],
                 "lower_bound": res["lower_bound"],
+                "min_sum_value": res.get("min_sum_value", np.nan),
                 "gen_inst": gen_inst, "instance_tag": tag,
                 "factors": _fmt_list(factors) if gen_inst == "heterogene" else "",
                 "prop": _fmt_list(prop) if gen_inst == "heterogene" else "",

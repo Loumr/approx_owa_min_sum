@@ -35,10 +35,12 @@ from openpyxl.utils import get_column_letter
 
 # Le motif approx_* couvre aussi les fichiers *_loop.csv (version itérative)
 PATTERNS = ("approx_n*_delta*_eps*_*.csv", "exact_n*_*.csv", "min_lorenz*_n*_eps*_*.csv")
-CONFIG_KEYS = ["method", "w_type", "n", "delta", "eps"]
+# instance_tag : famille d'instances (sous-dossier : uniform, double_uniform_coef1, heterogene_...)
+CONFIG_KEYS = ["method", "instance_tag", "w_type", "n", "delta", "eps"]
 INSTANCE_KEYS = CONFIG_KEYS + ["seed", "instance"]
-MATCH_KEYS = ["w_type", "n", "seed", "instance"]   # pour retrouver l'exact d'une instance
+MATCH_KEYS = ["instance_tag", "w_type", "n", "seed", "instance"]   # pour retrouver l'exact d'une instance
 EXACT_METHOD = "exact"
+DEFAULT_TAG = "uniform"   # fichiers écrits avant les sous-dossiers par famille
 LOOP_SUFFIX = "_loop"   # version itérative de ordered_opt.py (--loop)
 CHEN_PREFIX = "chen_appendixC"
 # Suffixe(s) _alpha... en fin de nom ("chen_appendixC_alpha", "chen_appendixC_alpha_alpha0.5", ...)
@@ -72,6 +74,7 @@ def method_name(base, alpha):
 # Libellés lisibles (colonnes absentes ou entièrement vides ignorées)
 RAW_LABELS = {
     "method": "Méthode",
+    "instance_tag": "Famille d'instances",
     "w_type": "Poids",
     "n": "n",
     "delta": "delta",
@@ -118,7 +121,10 @@ def load_results(results_dir="../results/assignment", patterns=PATTERNS):
     colonne 'status' (anciennes versions sans limite de temps), une ligne avec une valeur
     est considérée comme terminée.
     """
-    files = sorted({f for p in patterns for f in glob.glob(os.path.join(results_dir, p))})
+    # Recherche récursive : les résultats sont rangés par famille d'instances
+    # (results_dir/uniform/, results_dir/heterogene_.../, ...), les anciens à la racine.
+    files = sorted({f for p in patterns
+                    for f in glob.glob(os.path.join(results_dir, "**", p), recursive=True)})
     if not files:
         raise FileNotFoundError(f"Aucun fichier de résultats ({', '.join(patterns)}) dans {results_dir}")
 
@@ -126,6 +132,13 @@ def load_results(results_dir="../results/assignment", patterns=PATTERNS):
     for f in files:
         df = pd.read_csv(f)
         df["source_file"] = os.path.basename(f)
+        # Famille d'instances : colonne du CSV, sinon nom du sous-dossier, sinon "uniform"
+        folder = os.path.relpath(os.path.dirname(f), results_dir)
+        tag = DEFAULT_TAG if folder in (".", "") else folder.replace(os.sep, "/")
+        if "instance_tag" not in df.columns:
+            df["instance_tag"] = tag
+        else:
+            df["instance_tag"] = df["instance_tag"].fillna(tag)
         frames.append(df)
     df = pd.concat(frames, ignore_index=True)
 
@@ -332,13 +345,15 @@ def summarize(df, nb_instances=None):
 # Écriture Excel
 # ---------------------------------------------------------------------------
 
-def _config_name(method, w_type, n, delta, eps):
+def _config_name(method, instance_tag, w_type, n, delta, eps):
     parts = [str(method), f"n{int(n)}"]
     if pd.notna(delta):
         parts.append(f"delta{delta}")
     if pd.notna(eps):
         parts.append(f"eps{eps}")
     parts.append(str(w_type))
+    if pd.notna(instance_tag) and str(instance_tag) != DEFAULT_TAG:
+        parts.append(str(instance_tag).replace("/", "-"))
     return "_".join(parts)
 
 
