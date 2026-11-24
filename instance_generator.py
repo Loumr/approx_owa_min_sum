@@ -19,7 +19,7 @@ import numpy as np
 FACTORS = [1, 2, 4]
 PROP = [0.8, 0.15, 0.05]
 COEF = 1
-GEN_INST = ("uniform", "double_uniform", "heterogene")
+GEN_INST = ("uniform", "double_uniform", "heterogene", "same")
 
 
 # ----------------------------------------------------------------------
@@ -67,6 +67,16 @@ def generate_cost_matrices_heterogene(n, nb_instances, factors, prop=[0.8, 0.15,
     return instances
 
 
+def generate_cost_matrices_same(n, nb_instances, seed=0):
+    rng = np.random.default_rng(seed)
+    instances = []
+
+    for _ in range(nb_instances):
+        vect_costs = rng.integers(1, 1001, n, dtype=int).astype(float)
+        A = np.tile(vect_costs, (n, n))
+        instances.append(A)
+
+    return instances
 
 
 
@@ -155,6 +165,21 @@ def generate_instances_heterogene(n, nb_instances, w_type, factors, prop, cost_s
     return instances
 
 
+
+def generate_instances_same(n, nb_instances, w_type, cost_seed=0):
+    cost_matrices = generate_cost_matrices_same(n, nb_instances, seed=cost_seed)
+    instances = []
+    for i in range(nb_instances):
+        W = get_weights(w_type, n, i)
+        instances.append({
+            "instance": i,
+            "cost_matrix": cost_matrices[i],
+            "W": W,
+        })
+    return instances
+
+
+
 def _fmt_list(values):
     """[1, 2, 4] -> '1-2-4' ; [0.8, 0.15, 0.05] -> '0.8-0.15-0.05'."""
     return "-".join(f"{v:g}" for v in values)
@@ -181,4 +206,7 @@ def generate_instances_by_type(gen_inst, n, nb_instances, w_type, seed=0,
         return generate_instances_double_uniform(n, nb_instances, w_type, prob, cost_seed=seed)
     if gen_inst == "heterogene":
         return generate_instances_heterogene(n, nb_instances, w_type, factors, prop, cost_seed=seed)
+    if gen_inst == "same":
+        return generate_instances_same(n, nb_instances, w_type, cost_seed=seed)
+
     raise ValueError(f"unknown gen_inst: {gen_inst}")
