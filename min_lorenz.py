@@ -102,7 +102,9 @@ def min_lorenz(cost_matrix, W, variant="v1", deadline=None, state=None):
     return assign, len(unique)
 
 
-def exact_gurobi(cost_matrix, W, time_limit=None, threads=1, mem_limit_gb=None, legacy_params=False):
+
+
+def exact_gurobi(cost_matrix, W, time_limit=None, threads=1, mem_limit_gb=None, legacy_params=False, warm_start=False):
     """
     OWA exact par MIP (formulation duale : alpha_i + beta_k >= W_i z_k, min sum alpha + beta).
 
@@ -137,13 +139,20 @@ def exact_gurobi(cost_matrix, W, time_limit=None, threads=1, mem_limit_gb=None, 
         z = m.addMVar(n, lb=0.0, name="z")
         alpha = m.addMVar(n, lb=-GRB.INFINITY, name="alpha")
         beta = m.addMVar(n, lb=-GRB.INFINITY, name="beta")
-
+ 
         for i in range(n):
             m.addConstr(z[i] == C[i] @ x[i, :])
             m.addConstr(x[i, :].sum() == 1)
             m.addConstr(x[:, i].sum() == 1)
         for i in range(n):
             m.addConstr(alpha[i] + beta - W[i] * z >= 0)
+
+
+        if warm_start:
+            _, sol = linear_sum_assignment(C)
+            x_start = np.zeros_like(C)
+            x_start[np.arange(n), sol] = 1.0
+            x.Start = x_start
 
         m.setObjective(alpha.sum() + beta.sum(), GRB.MINIMIZE)
         m.optimize()
@@ -177,12 +186,13 @@ def exact_gurobi(cost_matrix, W, time_limit=None, threads=1, mem_limit_gb=None, 
 # Expérience
 # ---------------------------------------------------------------------------
 
-def results_path(results_dir, method, n, eps, w_type, tag="uniform"):
+def results_path(results_dir, method, n, eps, w_type, tag="uniform", warm_start=False):
     folder = os.path.join(results_dir, tag)
+    ws = "_warm_start" if warm_start and method == "exact" else ""
     os.makedirs(folder, exist_ok=True)
     if method in NO_EPS_METHODS:
-        return os.path.join(folder, f"{method}_n{n}_{w_type}.csv")
-    return os.path.join(folder, f"{method}_n{n}_eps{eps}_{w_type}.csv")
+        return os.path.join(folder, f"{method}{ws}_n{n}_{w_type}.csv")
+    return os.path.join(folder, f"{method}{ws}_n{n}_eps{eps}_{w_type}.csv")
 
 
 def n_available_cores():
@@ -193,7 +203,7 @@ def n_available_cores():
         return os.cpu_count()
 
 
-def solve_one(instance, method, eps, deadline, gurobi_threads, gurobi_mem_gb=None, gurobi_legacy=False):
+def solve_one(instance, method, eps, deadline, gurobi_threads, gurobi_mem_gb=None, gurobi_legacy=False, warm_start=False):
     if deadline is not None and time.monotonic() >= deadline:
         return None  # budget épuisé avant le démarrage
 
@@ -206,7 +216,7 @@ def solve_one(instance, method, eps, deadline, gurobi_threads, gurobi_mem_gb=Non
     if method == "exact":
         remaining = None if deadline is None else deadline - time.monotonic()
         res = exact_gurobi(C, W, time_limit=remaining, threads=gurobi_threads,
-                           mem_limit_gb=gurobi_mem_gb, legacy_params=gurobi_legacy)
+                           mem_limit_gb=gurobi_mem_gb, legacy_params=gurobi_legacy, warm_start=warm_start)
         assign, status = res["assign"], res["status"]
         out.update(mip_gap=res["mip_gap"], solver_obj=res["solver_obj"],
                    lower_bound=res["lower_bound"])
@@ -236,7 +246,7 @@ def solve_one(instance, method, eps, deadline, gurobi_threads, gurobi_mem_gb=Non
 def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers=None,
         results_dir="../results/assignment", instances_dir="../results/instances",
         gurobi_threads=1, gurobi_mem_gb=None, gurobi_legacy=False, save_solutions=True,
-        rerun="unfinished", gen_inst="uniform", factors=FACTORS, prop=PROP, coef=COEF):
+        rerun="unfinished", gen_inst="uniform", factors=FACTORS, prop=PROP, coef=COEF, warm_start=False):
     
     if method not in METHODS:
         raise ValueError(f"method doit être parmi {METHODS}, reçu : {method}")
@@ -244,7 +254,7 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
         eps = np.nan  # sans objet pour l'exact et le min-somme
 
     tag = instance_tag(gen_inst, factors, prop, coef)
-    path = results_path(results_dir, method, n, eps, w_type, tag)
+    path = results_path(results_dir, method, n, eps, w_type, tag, warm_start)
     done = prepare_resume(path, rerun)
 
     instances = generate_instances_by_type(gen_inst, n, nb_instances, w_type, seed,
@@ -257,12 +267,12 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
     n_workers = n_workers or n_available_cores()
     deadline = time.monotonic() + time_limit if time_limit else None
     print(f"{method} n={n} eps={eps} {w_type} : {len(todo)} instance(s) sur {n_workers} worker(s), "
-          f"budget {time_limit if time_limit else 'illimité'} s", flush=True)
+          f"budget {time_limit if time_limit else 'illimité'} s", f"warm start: {warm_start}", flush=True)
 
     not_started = 0
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
         futures = [ex.submit(solve_one, inst, method, eps, deadline, gurobi_threads,
-                             gurobi_mem_gb, gurobi_legacy) for inst in todo]
+                             gurobi_mem_gb, gurobi_legacy, warm_start) for inst in todo]
         for fut in as_completed(futures):
             res = fut.result()
             if res is None:
@@ -270,6 +280,7 @@ def run(method, n, eps, w_type, nb_instances, seed=0, time_limit=None, n_workers
                 continue
             row = {
                 "method": method, "n": n, "delta": np.nan, "eps": eps, "w_type": w_type,
+                "warm_start": warm_start,
                 "seed": seed, "instance": res["instance"], "instance_hash": res["instance_hash"],
                 "status": res["status"], "best_value": res["best_value"],
                 "nb_sols": res["nb_sols"], "mip_gap": res["mip_gap"], "solver_obj": res["solver_obj"],
@@ -323,6 +334,7 @@ if __name__ == "__main__":
                         help="double_uniform : prob = coef / n de tirer un coût faible")
     parser.add_argument("--results-dir", default="../results/assignment")
     parser.add_argument("--instances-dir", default="../results/instances")
+    parser.add_argument("--warm-start", action="store_true", help="add warm start in gurobi solver")
     args = parser.parse_args()
 
     if args.gen_inst == "heterogene":
@@ -337,4 +349,4 @@ if __name__ == "__main__":
             n_workers=args.workers, results_dir=args.results_dir,
             instances_dir=args.instances_dir, gurobi_threads=args.gurobi_threads,
             gurobi_mem_gb=args.gurobi_mem_gb, gurobi_legacy=args.gurobi_legacy_params,
-            rerun=args.rerun, gen_inst=args.gen_inst, factors=args.factors, prop=args.prop, coef=args.coef)
+            rerun=args.rerun, gen_inst=args.gen_inst, factors=args.factors, prop=args.prop, coef=args.coef, warm_start=args.warm_start)
